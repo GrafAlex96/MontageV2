@@ -24,7 +24,8 @@ class VideoAnalyzer:
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
     def detect_scenes(self, threshold: float = 30.0) -> List[Scene]:
-        """Detect scenes using color histogram changes."""
+        """Detect scenes using color histogram changes (optimized for large files)."""
+        # OpenCV handles large files via seeking and frame-by-frame reading
         cap = cv2.VideoCapture(self.video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps == 0: fps = 30.0
@@ -39,8 +40,8 @@ class VideoAnalyzer:
             if not ret:
                 break
 
-            # Subsample frames for performance
-            if frame_idx % 5 != 0:
+            # Subsample frames for performance (chunk-based analysis)
+            if frame_idx % 10 != 0:
                 frame_idx += 1
                 continue
 

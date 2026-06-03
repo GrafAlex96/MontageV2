@@ -13,30 +13,20 @@ class TimelineManager:
         self.target_duration = target_duration
         self.editing_rules = editing_rules or {}
 
-    def build_combined_timeline(self, clips: List[VideoClip], beats: List[float] = None) -> List[Dict]:
+    def build_combined_timeline_from_items(self, candidate_items: List[Dict], beats: List[float] = None) -> List[Dict]:
         """
-        Combine scenes from multiple clips and select the best ones for the timeline.
-        Returns a list of dicts with path and scene info.
+        Build the final timeline using candidates selected by Master Editor.
+        Candidate items are already ordered (Hook first).
         """
-        all_scenes_with_source = []
-        for clip in clips:
-            for scene in clip.scenes:
-                all_scenes_with_source.append({
-                    'path': clip.path,
-                    'scene': scene
-                })
-
-        # Sort all scenes by score
-        all_scenes_with_source.sort(key=lambda x: x['scene'].score, reverse=True)
-
         selected_timeline = []
         current_total_duration = 0.0
 
-        for item in all_scenes_with_source:
+        # Rule enforcement: Cut duration
+        min_dur = self.editing_rules.get('cut_rules', {}).get('min_duration', 1.0)
+        max_dur = self.editing_rules.get('cut_rules', {}).get('max_duration', 5.0)
+
+        for item in candidate_items:
             scene = item['scene']
-            # Apply cut rules from director
-            min_dur = self.editing_rules.get('cut_rules', {}).get('min_duration', 1.0)
-            max_dur = self.editing_rules.get('cut_rules', {}).get('max_duration', 5.0)
 
             duration = min(max(scene.end_time - scene.start_time, min_dur), max_dur)
             scene.end_time = scene.start_time + duration
@@ -46,7 +36,7 @@ class TimelineManager:
                 current_total_duration += duration
             elif current_total_duration < self.target_duration:
                 remaining = self.target_duration - current_total_duration
-                if remaining > 1.0:
+                if remaining > 0.5: # Lowered threshold for single user quality
                     scene.end_time = scene.start_time + remaining
                     selected_timeline.append(item)
                     current_total_duration += remaining
@@ -54,24 +44,10 @@ class TimelineManager:
             if current_total_duration >= self.target_duration:
                 break
 
-        # In multi-video mode, find the absolute best hook across all videos
-        # and ensure it's at the absolute beginning.
-        if not selected_timeline: return []
-
-        # Sort all selected by score to find the best hook
-        best_hook_item = max(selected_timeline, key=lambda x: x['scene'].score)
-
-        others = [item for item in selected_timeline if item != best_hook_item]
-        # Sort others chronologically within their respective videos
-        others.sort(key=lambda x: (x['path'], x['scene'].start_time))
-
-        final_selected = [best_hook_item] + others
-
-        # Beat-sync if beats are available
         if beats:
-            final_selected = self._sync_to_beats(final_selected, beats)
+            selected_timeline = self._sync_to_beats(selected_timeline, beats)
 
-        return final_selected
+        return selected_timeline
 
     def _sync_to_beats(self, timeline: List[Dict], beats: List[float]) -> List[Dict]:
         """Adjust clip durations to align with beats."""

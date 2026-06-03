@@ -15,6 +15,7 @@ from app.services.resource_manager import ResourceManager
 from app.services.validator import FinalValidator
 from app.agents.story_intelligence import StoryIntelligence
 from app.agents.director_agent import DirectorAgent
+from app.agents.master_editor import MasterEditor
 from app.agents.editing_presets import EditingPresets
 from app.core.config import settings
 from aiogram import Bot
@@ -33,6 +34,7 @@ class VideoWorker:
         self.quality_gate = QualityGate()
         self.story_intel = StoryIntelligence()
         self.director = DirectorAgent()
+        self.master_editor = MasterEditor()
         self.presets = EditingPresets()
 
     async def process_job(self, job_id: int):
@@ -66,39 +68,52 @@ class VideoWorker:
                     scenes = analyzer.analyze_movement(scenes)
                     silences = analyzer.detect_silence()
 
-                    # --- NEW DIRECTOR-LEVEL PRE-PROCESSING ---
+                    # --- CONSOLIDATED MASTER EDITOR PIPELINE ---
                     # STEP 1: Story Intelligence
                     story_data = self.story_intel.analyze_content(scenes)
 
-                    # STEP 2: Director Agent
-                    strategy = self.director.decide_strategy(story_data, {"duration": file.duration})
+                    # STEP 2: Director Agent (Suggestions only)
+                    director_suggestions = self.director.suggest_strategy(story_data)
 
-                    # STEP 3: Apply Presets
-                    editing_rules = self.presets.get_rules(strategy["preset"])
-
-                    logger.info(f"Director selected preset: {strategy['preset']}", extra={"trace_id": job.trace_id})
-                    # --- END DIRECTOR-LEVEL PRE-PROCESSING ---
-
+                    # Integration note: Master Editor needs ALL clips for global hook
                     scored_scenes = analyzer.generate_quality_scores(scenes, silences)
                     clips.append(VideoClip(path=file.file_path, scenes=scored_scenes))
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
                     await self._update_progress(job_id, progress)
 
-                # 3. Build Timeline
+                # 3. Consolidated Master Pipeline
                 await session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
                 await session.commit()
 
-                # Reuse last editing_rules from analyze loop or use default
-                rules = editing_rules if 'editing_rules' in locals() else {}
-                timeline_manager = TimelineManager(target_duration=job.target_duration, editing_rules=rules)
+                # --- NEW MASTER EDITOR PIPELINE (GLOBAL) ---
+                # Combine all scenes from all clips into items for Master Editor
+                all_items = []
+                for clip in clips:
+                    for scene in clip.scenes:
+                        all_items.append({'path': clip.path, 'scene': scene})
 
-                # Detect beats for beat-sync
+                # Story intel from the first clip for overall theme
+                story_data = self.story_intel.analyze_content(clips[0].scenes if clips else [])
+                director_suggestions = self.director.suggest_strategy(story_data)
+
+                final_strategy = self.master_editor.decide_final_strategy(
+                    story_data, director_suggestions, all_items
+                )
+
+                editing_rules = self.presets.get_rules(final_strategy["final_preset"])
+                logger.info(f"Master Decision: {final_strategy['final_preset']}", extra={"trace_id": job.trace_id})
+                # --- END MASTER EDITOR PIPELINE ---
+
+                timeline_manager = TimelineManager(target_duration=job.target_duration, editing_rules=editing_rules)
+
+                # Detect beats for beat-sync (on first clip)
                 beats = []
                 if clips:
                     beats = self.audio_service.detect_beats(clips[0].path)
 
-                timeline = timeline_manager.build_combined_timeline(clips, beats=beats)
+                # Get candidates from Master Editor decision
+                timeline = timeline_manager.build_combined_timeline_from_items(final_strategy["final_timeline"], beats=beats)
 
                 # Quality Gate Check with Automatic Re-edit Loop
                 max_retries = 3
@@ -111,7 +126,7 @@ class VideoWorker:
 
                     if attempt < max_retries - 1:
                         logger.warning(f"Quality scores too low, attempting re-edit...", extra={"trace_id": job.trace_id})
-                        timeline = timeline_manager.build_combined_timeline(clips, beats=beats)
+                        timeline = timeline_manager.build_combined_timeline_from_items(final_strategy["final_timeline"], beats=beats)
                     else:
                         logger.error(f"Failed to reach quality targets after {max_retries} attempts. Proceeding.", extra={"trace_id": job.trace_id})
 

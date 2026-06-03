@@ -13,7 +13,15 @@ def test_combined_timeline():
     ])
 
     manager = TimelineManager(target_duration=15)
-    timeline = manager.build_combined_timeline([clip1, clip2])
+    items = []
+    for c in [clip1, clip2]:
+        for s in c.scenes:
+            items.append({'path': c.path, 'scene': s})
+
+    # Mock master editor sorting
+    items.sort(key=lambda x: x['scene'].score, reverse=True)
+
+    timeline = manager.build_combined_timeline_from_items(items)
 
     # Due to default min/max duration rules in Director system:
     # min_dur = 1.0, max_dur = 5.0

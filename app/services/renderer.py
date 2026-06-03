@@ -49,15 +49,18 @@ class Renderer:
                 signal.alarm(0)
 
         try:
-            with timeout(300): # 5 minute timeout for rendering
+            # Single user mode: prefer quality over speed
+            with timeout(600): # Extended timeout for high quality
                 final_clip.write_videofile(
                     output_path,
                     fps=self.fps,
                     codec="libx264",
                     audio_codec="aac",
+                    bitrate="5000k", # High bitrate for Instagram Reels
+                    preset="slow",   # Better compression quality
                     temp_audiofile=f"temp-audio-{os.getpid()}.m4a",
                     remove_temp=True,
-                    logger=None # Suppress moviepy progress bar to JSON log
+                    logger=None
                 )
         except Exception as e:
             logger.error(f"Rendering failed or timed out: {e}")

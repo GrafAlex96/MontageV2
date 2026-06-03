@@ -1,9 +1,13 @@
 from typing import Dict, Any
 
 class EditingPresets:
+    """
+    Define deterministic technical constraints based on style.
+    Presets MUST NOT influence story decisions.
+    """
     PRESETS = {
         "viral_hype": {
-            "cut_rules": {"min_duration": 0.3, "max_duration": 1.2},
+            "cut_rules": {"min_duration": 0.3, "max_duration": 1.5}, # Slightly relaxed for quality
             "transition_rules": {"type": "zoom", "frequency": "high"},
             "subtitle_style": {"highlight": True, "pacing": "fast"},
             "pacing_rules": {"target_fps": 30, "pattern_interrupts": True}
