@@ -13,6 +13,9 @@ from app.services.notifications import NotificationService
 from app.services.quality_gate import QualityGate
 from app.services.resource_manager import ResourceManager
 from app.services.validator import FinalValidator
+from app.agents.story_intelligence import StoryIntelligence
+from app.agents.director_agent import DirectorAgent
+from app.agents.editing_presets import EditingPresets
 from app.core.config import settings
 from aiogram import Bot
 
@@ -28,6 +31,9 @@ class VideoWorker:
         self.renderer = Renderer()
         self.notifier = NotificationService(bot)
         self.quality_gate = QualityGate()
+        self.story_intel = StoryIntelligence()
+        self.director = DirectorAgent()
+        self.presets = EditingPresets()
 
     async def process_job(self, job_id: int):
         ResourceManager.cleanup_zombie_processes()
@@ -54,11 +60,25 @@ class VideoWorker:
                 # 2. Analyze
                 clips = []
                 for i, file in enumerate(files):
-                    logger.info(f"Analyzing file {file.file_path}")
+                    logger.info(f"Analyzing file {file.file_path}", extra={"trace_id": job.trace_id})
                     analyzer = VideoAnalyzer(file.file_path)
                     scenes = analyzer.detect_scenes()
                     scenes = analyzer.analyze_movement(scenes)
                     silences = analyzer.detect_silence()
+
+                    # --- NEW DIRECTOR-LEVEL PRE-PROCESSING ---
+                    # STEP 1: Story Intelligence
+                    story_data = self.story_intel.analyze_content(scenes)
+
+                    # STEP 2: Director Agent
+                    strategy = self.director.decide_strategy(story_data, {"duration": file.duration})
+
+                    # STEP 3: Apply Presets
+                    editing_rules = self.presets.get_rules(strategy["preset"])
+
+                    logger.info(f"Director selected preset: {strategy['preset']}", extra={"trace_id": job.trace_id})
+                    # --- END DIRECTOR-LEVEL PRE-PROCESSING ---
+
                     scored_scenes = analyzer.generate_quality_scores(scenes, silences)
                     clips.append(VideoClip(path=file.file_path, scenes=scored_scenes))
 
@@ -69,7 +89,9 @@ class VideoWorker:
                 await session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
                 await session.commit()
 
-                timeline_manager = TimelineManager(target_duration=job.target_duration)
+                # Reuse last editing_rules from analyze loop or use default
+                rules = editing_rules if 'editing_rules' in locals() else {}
+                timeline_manager = TimelineManager(target_duration=job.target_duration, editing_rules=rules)
 
                 # Detect beats for beat-sync
                 beats = []

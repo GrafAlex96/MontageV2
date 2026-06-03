@@ -9,8 +9,9 @@ class VideoClip:
     scenes: List[Scene]
 
 class TimelineManager:
-    def __init__(self, target_duration: int):
+    def __init__(self, target_duration: int, editing_rules: Dict = None):
         self.target_duration = target_duration
+        self.editing_rules = editing_rules or {}
 
     def build_combined_timeline(self, clips: List[VideoClip], beats: List[float] = None) -> List[Dict]:
         """
@@ -33,7 +34,12 @@ class TimelineManager:
 
         for item in all_scenes_with_source:
             scene = item['scene']
-            duration = scene.end_time - scene.start_time
+            # Apply cut rules from director
+            min_dur = self.editing_rules.get('cut_rules', {}).get('min_duration', 1.0)
+            max_dur = self.editing_rules.get('cut_rules', {}).get('max_duration', 5.0)
+
+            duration = min(max(scene.end_time - scene.start_time, min_dur), max_dur)
+            scene.end_time = scene.start_time + duration
 
             if current_total_duration + duration <= self.target_duration:
                 selected_timeline.append(item)

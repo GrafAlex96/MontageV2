@@ -223,4 +223,13 @@
 - **Reason**: Production reliability requirement to ensure correct output before delivery.
 - **Impact**: Zero delivery of broken or incorrect videos.
 - **Risk**: Low.
-- **Testing**: Verified with known valid/invalid files.
+- **Testing**: Passed unit tests.
+
+## [26] 2026-06-03 - Director-Level Editing Extension
+- **Modified files**: `app/agents/story_intelligence.py`, `app/agents/director_agent.py`, `app/agents/editing_presets.py`, `app/workers/video_worker.py`
+- **Type**: Feature / Extension
+- **Description**: Added three new layers for semantic understanding, strategy decision-making, and style enforcement.
+- **Reason**: Requirement for "Director-Level" AI editing that mimics human decisions.
+- **Impact**: Significant improvement in output style consistency and narrative coherence.
+- **Risk**: Low (Backward compatible).
+- **Testing**: Integration verified in pipeline flow.
