@@ -1,6 +1,9 @@
 import subprocess
 import os
+import logging
 from typing import List
+
+logger = logging.getLogger(__name__)
 
 class AudioService:
     def normalize_audio(self, input_path: str, output_path: str):
@@ -15,15 +18,24 @@ class AudioService:
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def detect_beats(self, input_path: str) -> List[float]:
-        """Detect beats in the audio file using librosa."""
+        """Detect beats in the audio file using librosa with fallback."""
         import librosa
+        import numpy as np
         try:
             y, sr = librosa.load(input_path, sr=None)
+            # Check if there is enough audio energy for beats
+            if np.max(np.abs(y)) < 0.01:
+                return []
+
             tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+            # Confidence check: if tempo is very low or high, it might be noise/speech
+            if tempo < 40 or tempo > 220:
+                return []
+
             beat_times = librosa.frames_to_time(beat_frames, sr=sr)
             return [float(t) for t in beat_times]
         except Exception as e:
-            print(f"Beat detection failed: {e}")
+            logger.warning(f"Beat detection failed: {e}")
             return []
 
     def remove_noise(self, input_path: str, output_path: str):

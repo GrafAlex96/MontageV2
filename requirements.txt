@@ -13,3 +13,7 @@ scipy
 numpy
 tqdm
 librosa
+rq
+redis
+python-json-logger
+psutil

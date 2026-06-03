@@ -24,6 +24,7 @@ async def test_handle_video():
     message.video.file_size = 1000
     message.video.duration = 10
     message.video.file_name = "test.mp4"
+    message.video.mime_type = "video/mp4"
     message.answer = AsyncMock()
 
     state = AsyncMock()

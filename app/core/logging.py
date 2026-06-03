@@ -1,15 +1,21 @@
 import logging
 import sys
+from pythonjsonlogger import jsonlogger
 
 def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler("app.log")
-        ]
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = jsonlogger.JsonFormatter(
+        '%(asctime)s %(name)s %(levelname)s %(message)s %(trace_id)s'
     )
+    handler.setFormatter(formatter)
+
+    file_handler = logging.FileHandler("app.json.log")
+    file_handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+    root_logger.addHandler(file_handler)
 
     # Set levels for noisy libraries
     logging.getLogger("aiogram").setLevel(logging.INFO)

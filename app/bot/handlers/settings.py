@@ -4,6 +4,7 @@ from app.db.session import async_session
 from app.db.models import Job, JobStatus
 from sqlalchemy import update
 import logging
+from app.core.queue import enqueue_job
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -36,10 +37,12 @@ async def process_set_duration(callback: types.CallbackQuery, state: FSMContext)
     async with async_session() as session:
         stmt = update(Job).where(Job.id == job_id).values(
             target_duration=duration,
-            status=JobStatus.PENDING # Ensure it's pending for the worker
+            status=JobStatus.QUEUED
         )
         await session.execute(stmt)
         await session.commit()
+
+    enqueue_job(job_id)
 
     await state.clear()
     await callback.message.edit_text(f"Duration set to {duration}s. Your video is now in the queue! 🚀 We'll notify you when it's ready.")

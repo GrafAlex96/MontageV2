@@ -31,6 +31,13 @@ async def cmd_start(message: types.Message):
 
 @router.message(F.video)
 async def handle_video(message: types.Message, state: FSMContext, bot):
+    # 1. Strict Validation
+    if not message.video or message.video.mime_type not in ['video/mp4', 'video/quicktime', 'video/x-matroska']:
+        return await message.answer("Unsupported file format. Please send MP4, MOV or MKV.")
+
+    if message.video.file_size > 2 * 1024 * 1024 * 1024: # 2GB
+        return await message.answer("File is too large. Maximum size is 2GB.")
+
     # Get or create active job in FSM
     data = await state.get_data()
     job_id = data.get('active_job_id')
@@ -57,13 +64,30 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
         if file_count > 20:
             return await message.answer("Maximum 20 videos allowed.")
 
-        # Download video
+        # 2. Path Traversal Protection
         file_id = message.video.file_id
         file = await bot.get_file(file_id)
 
+        # Use UUID to prevent path traversal
         file_ext = os.path.splitext(file.file_path)[1] or ".mp4"
+        if not file_ext.lower() in ['.mp4', '.mov', '.mkv']:
+             file_ext = ".mp4"
+
         local_filename = f"{uuid.uuid4()}{file_ext}"
-        local_path = os.path.join(settings.TEMP_STORAGE_PATH, local_filename)
+        # Ensure path is strictly inside temp storage
+        local_path = os.path.abspath(os.path.join(settings.TEMP_STORAGE_PATH, local_filename))
+        if not local_path.startswith(os.path.abspath(settings.TEMP_STORAGE_PATH)):
+            raise ValueError("Potential path traversal attack detected")
+
+        # 3. User Quota Check
+        stmt = select(User).where(User.id == user.id)
+        res = await session.execute(stmt)
+        user = res.scalar_one()
+        if user.used_storage_bytes + message.video.file_size > user.storage_quota_bytes:
+             return await message.answer("Storage quota exceeded. Please delete some videos first.")
+
+        # Update used storage
+        user.used_storage_bytes += message.video.file_size
 
         await bot.download_file(file.file_path, local_path)
 

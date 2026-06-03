@@ -22,12 +22,13 @@ class SubtitleService:
         result = self.model.transcribe(video_path, verbose=False, word_timestamps=True)
 
         segments = []
-        # Social media style: 1-2 words per line
+        # Social media style: 2-5 words per line (semantic chunks)
         temp_words = []
         for segment in result.get('segments', []):
             for word in segment.get('words', []):
                 temp_words.append(word)
-                if len(temp_words) >= 1: # 1 word per segment for maximum impact
+                # Group into chunks of 3 words for better readability
+                if len(temp_words) >= 3 or word['word'].endswith(('.', '!', '?')):
                     segments.append({
                         'word': " ".join([w['word'].strip() for w in temp_words]),
                         'start': temp_words[0]['start'],
@@ -35,6 +36,15 @@ class SubtitleService:
                         'probability': sum([w['probability'] for w in temp_words]) / len(temp_words)
                     })
                     temp_words = []
+
+        # Flush remaining
+        if temp_words:
+            segments.append({
+                'word': " ".join([w['word'].strip() for w in temp_words]),
+                'start': temp_words[0]['start'],
+                'end': temp_words[-1]['end'],
+                'probability': sum([w['probability'] for w in temp_words]) / len(temp_words)
+            })
         return segments
 
     def generate_srt(self, word_segments: List[Dict]) -> str:

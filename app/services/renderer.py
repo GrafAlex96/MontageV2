@@ -33,14 +33,35 @@ class Renderer:
         if subtitles:
             final_clip = self._add_subtitles(final_clip, subtitles)
 
-        final_clip.write_videofile(
-            output_path,
-            fps=self.fps,
-            codec="libx264",
-            audio_codec="aac",
-            temp_audiofile="temp-audio.m4a",
-            remove_temp=True
-        )
+        # Use a timeout for writing video file to prevent infinite hangs
+        import signal
+        from contextlib import contextmanager
+
+        @contextmanager
+        def timeout(seconds):
+            def handler(signum, frame):
+                raise TimeoutError("Rendering timed out")
+            signal.signal(signal.SIGALRM, handler)
+            signal.alarm(seconds)
+            try:
+                yield
+            finally:
+                signal.alarm(0)
+
+        try:
+            with timeout(300): # 5 minute timeout for rendering
+                final_clip.write_videofile(
+                    output_path,
+                    fps=self.fps,
+                    codec="libx264",
+                    audio_codec="aac",
+                    temp_audiofile=f"temp-audio-{os.getpid()}.m4a",
+                    remove_temp=True,
+                    logger=None # Suppress moviepy progress bar to JSON log
+                )
+        except Exception as e:
+            logger.error(f"Rendering failed or timed out: {e}")
+            raise
 
         # Close all clips
         for clip in clips:

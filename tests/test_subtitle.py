@@ -27,6 +27,6 @@ def test_transcribe(mock_load_model):
         service = SubtitleService()
         segments = service.transcribe("dummy.mp4")
 
-        assert len(segments) == 2
-        assert segments[0]['word'] == 'Hello'
-        assert segments[1]['word'] == 'world'
+        assert len(segments) == 1
+        assert "Hello" in segments[0]['word']
+        assert "world" in segments[0]['word']

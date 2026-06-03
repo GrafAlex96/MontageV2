@@ -160,4 +160,67 @@
 - **Reason**: Address code review feedback and ensure production readiness.
 - **Impact**: Improved reliability and cleaner codebase.
 - **Risk**: Low.
-- **Testing**: Final integration tests passed.
+- **Testing**: Passed unit tests.
+
+## [19] 2026-06-03 - Production State Machine and Quotas
+- **Modified files**: `app/db/models.py`
+- **Type**: Refactor
+- **Description**: Expanded JobStatus with granular states (QUEUED, ANALYZING, RENDERING, etc.). Added storage quotas and trace_id.
+- **Reason**: Production hardening requirement for strict state machine and resource management.
+- **Impact**: Better observability and control over job lifecycle.
+- **Risk**: Medium (Database schema change).
+- **Testing**: DB initialization verified.
+
+## [20] 2026-06-03 - Structured Logging and Unified Exceptions
+- **Modified files**: `app/core/logging.py`, `app/core/exceptions.py`
+- **Type**: Optimization
+- **Description**: Implemented JSON logging and created centralized exception hierarchy.
+- **Reason**: Production hardening for observability and error handling.
+- **Impact**: Improved log parsing and unified error management.
+- **Risk**: Low.
+- **Testing**: Manual log check.
+
+## [21] 2026-06-03 - Redis Queue Integration
+- **Modified files**: `app/core/queue.py`, `app/workers/video_worker.py`, `app/bot/handlers/settings.py`
+- **Type**: Architectural Fix
+- **Description**: Replaced DB polling with Redis Queue (RQ) for job distribution.
+- **Reason**: Scalability, fault tolerance, and elimination of race conditions.
+- **Impact**: Distributed processing support and better job isolation.
+- **Risk**: Medium (New infrastructure dependency).
+- **Testing**: DB state transitions verified.
+
+## [22] 2026-06-03 - Resource and Process Hardening
+- **Modified files**: `app/services/resource_manager.py`, `app/services/renderer.py`, `app/workers/video_worker.py`
+- **Type**: Optimization
+- **Description**: Implemented zombie process cleanup, system resource monitoring, and rendering timeouts.
+- **Reason**: Production stability requirement to prevent resource exhaustion and hanging processes.
+- **Impact**: Increased system uptime and reliability.
+- **Risk**: Low.
+- **Testing**: Verified timeout logic.
+
+## [23] 2026-06-03 - Security and Storage Hardening
+- **Modified files**: `app/bot/handlers/upload.py`, `app/workers/cleanup_worker.py`
+- **Type**: Security
+- **Description**: Implemented strict file validation, path traversal protection, user storage quotas, and a TTL-based cleanup worker.
+- **Reason**: Production requirement for security and resource protection.
+- **Impact**: Prevents malicious uploads and disk exhaustion.
+- **Risk**: Low.
+- **Testing**: Quota and validation logic verified.
+
+## [24] 2026-06-03 - Pipeline Stabilization
+- **Modified files**: `app/services/subtitle.py`, `app/services/audio.py`
+- **Type**: Bug Fix/Optimization
+- **Description**: Improved subtitle readability (2-5 word chunks). Added fallback and confidence check for beat detection.
+- **Reason**: Address production feedback on subtitle pacing and beat-sync reliability.
+- **Impact**: Higher quality output and more robust processing.
+- **Risk**: Low.
+- **Testing**: Unit tests updated.
+
+## [25] 2026-06-03 - Final Validation System
+- **Modified files**: `app/services/validator.py`, `app/workers/video_worker.py`
+- **Type**: Feature
+- **Description**: Implemented post-render validation of duration, resolution, and stream integrity using ffprobe.
+- **Reason**: Production reliability requirement to ensure correct output before delivery.
+- **Impact**: Zero delivery of broken or incorrect videos.
+- **Risk**: Low.
+- **Testing**: Verified with known valid/invalid files.
