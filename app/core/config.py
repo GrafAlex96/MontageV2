@@ -4,8 +4,8 @@ from typing import Optional
 
 class Settings(BaseSettings):
     BOT_TOKEN: str = "YOUR_TELEGRAM_BOT_TOKEN"
-    DATABASE_URL: str = "sqlite+aiosqlite:///./video_editor.db"
-    TEMP_STORAGE_PATH: str = "./temp_storage"
+    DATABASE_URL: str = "sqlite:///./video_editor.db"
+    TEMP_STORAGE_PATH: str = "./uploads"
     WHISPER_MODEL: str = "base"
 
     # Video settings

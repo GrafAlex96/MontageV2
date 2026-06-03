@@ -8,14 +8,14 @@ async def test_send_progress_update():
     bot = AsyncMock()
     service = NotificationService(bot)
 
-    from app.db.session import async_session
-    async with async_session() as session:
+    from app.db.session import get_db
+    with get_db() as session:
         user = User(telegram_id=111, username="notif_test")
         session.add(user)
-        await session.flush()
+        session.flush()
         job = Job(id=10, user_id=user.id)
         session.add(job)
-        await session.commit()
+        session.commit()
 
     await service.send_progress_update(10, 0.25)
     bot.send_message.assert_called_once()

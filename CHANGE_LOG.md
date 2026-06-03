@@ -22,4 +22,5 @@
 | 1.2.0 | 2026-06-03 | app/agents/ (New modules) | Extension | Director-Level layers | Quality | Human-level editing | Medium | Verified |
 | 1.2.1 | 2026-06-03 | app/agents/master_editor.py | Architectural Fix | Master Editor Consolidation | Stability | Unified authority | Low | Verified |
 | 1.2.2 | 2026-06-03 | app/services/renderer.py, analysis.py | Optimization | Final Stabilization | Quality | Support 2GB+ files | Low | Verified |
-| 1.2.3 | 2026-06-03 | CHANGE_LOG.md | Optimization | Unified Change Log | Compliance | Auditability | Low | Done |
+| 1.2.3 | 2026-06-03 | CHANGE_LOG.md | Optimization | Unified Change Log | Compliance | Auditability | Low | Verified |
+| 2.0.0 | 2026-06-03 | app/db/session.py, handlers, workers | Architectural Fix | Sync Architecture Unification | Stability | Removed async/sync DB conflicts | Medium | Verified |

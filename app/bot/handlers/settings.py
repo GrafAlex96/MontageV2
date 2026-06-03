@@ -1,6 +1,6 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
-from app.db.session import async_session
+from app.db.session import get_db
 from app.db.models import Job, JobStatus
 from sqlalchemy import update
 import logging
@@ -34,13 +34,12 @@ async def process_set_duration(callback: types.CallbackQuery, state: FSMContext)
     job_id = int(parts[2])
     duration = int(parts[3])
 
-    async with async_session() as session:
-        stmt = update(Job).where(Job.id == job_id).values(
+    with get_db() as session:
+        session.execute(update(Job).where(Job.id == job_id).values(
             target_duration=duration,
             status=JobStatus.QUEUED
-        )
-        await session.execute(stmt)
-        await session.commit()
+        ))
+        session.commit()
 
     enqueue_job(job_id)
 

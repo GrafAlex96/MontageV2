@@ -1,6 +1,6 @@
 from aiogram import Bot
 import logging
-from app.db.session import async_session
+from app.db.session import get_db
 from app.db.models import Job, User
 from sqlalchemy import select
 
@@ -12,10 +12,8 @@ class NotificationService:
 
     async def send_progress_update(self, job_id: int, progress: float):
         """Send a message to the user about their job progress."""
-        async with async_session() as session:
-            stmt = select(Job, User).join(User).where(Job.id == job_id)
-            result = await session.execute(stmt)
-            item = result.fetchone()
+        with get_db() as session:
+            item = session.execute(select(Job, User).join(User).where(Job.id == job_id)).fetchone()
             if not item:
                 return
 
@@ -33,9 +31,7 @@ class NotificationService:
                 logger.error(f"Failed to send progress update: {e}")
 
     async def notify_error(self, job_id: int, error: str):
-        async with async_session() as session:
-            stmt = select(User).join(Job).where(Job.id == job_id)
-            result = await session.execute(stmt)
-            user = result.scalar_one_or_none()
+        with get_db() as session:
+            user = session.execute(select(User).join(Job).where(Job.id == job_id)).scalar_one_or_none()
             if user:
                 await self.bot.send_message(user.telegram_id, f"❌ Error processing your video: {error}")

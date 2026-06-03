@@ -2,7 +2,7 @@ from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from app.db.session import async_session
+from app.db.session import get_db
 from app.db.models import User, Job, UploadedFile, JobStatus
 from sqlalchemy import select
 import os
@@ -16,16 +16,14 @@ class UploadStates(StatesGroup):
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
-    async with async_session() as session:
+    with get_db() as session:
         # Register user
-        stmt = select(User).where(User.telegram_id == message.from_user.id)
-        result = await session.execute(stmt)
-        user = result.scalar_one_or_none()
+        user = session.execute(select(User).where(User.telegram_id == message.from_user.id)).scalar_one_or_none()
 
         if not user:
             user = User(telegram_id=message.from_user.id, username=message.from_user.username)
             session.add(user)
-            await session.commit()
+            session.commit()
 
     await message.answer("Welcome to AI Video Editor! 🎬\nSend me one or more videos (up to 20) and I'll edit them for you.")
 
@@ -42,21 +40,19 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
     data = await state.get_data()
     job_id = data.get('active_job_id')
 
-    async with async_session() as session:
+    with get_db() as session:
         if not job_id:
             # Create new job
-            stmt = select(User).where(User.telegram_id == message.from_user.id)
-            res = await session.execute(stmt)
-            user = res.scalar_one_or_none()
+            user = session.execute(select(User).where(User.telegram_id == message.from_user.id)).scalar_one_or_none()
 
             if not user:
                 user = User(telegram_id=message.from_user.id, username=message.from_user.username)
                 session.add(user)
-                await session.flush()
+                session.flush()
 
             job = Job(user_id=user.id, status=JobStatus.PENDING)
             session.add(job)
-            await session.flush()
+            session.flush()
             job_id = job.id
             await state.update_data(active_job_id=job_id, file_count=0)
 
@@ -80,9 +76,7 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
             raise ValueError("Potential path traversal attack detected")
 
         # 3. User Quota Check
-        stmt = select(User).where(User.id == user.id)
-        res = await session.execute(stmt)
-        user = res.scalar_one()
+        user = session.execute(select(User).where(User.id == user.id)).scalar_one()
         if user.used_storage_bytes + message.video.file_size > user.storage_quota_bytes:
              return await message.answer("Storage quota exceeded. Please delete some videos first.")
 
@@ -100,7 +94,7 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
             duration=message.video.duration
         )
         session.add(uploaded_file)
-        await session.commit()
+        session.commit()
 
         await state.update_data(file_count=file_count)
 

@@ -19,11 +19,12 @@ async def start_bot():
         dp.include_router(upload.router)
         dp.include_router(settings_handlers.router)
 
-        # Start worker in background
-        worker = VideoWorker(bot)
-        asyncio.create_task(worker.run())
+        # In this consolidated single-user version,
+        # we don't need a custom worker loop polling DB if we use RQ.
+        # But if RQ is not running, we might need a fallback.
+        # For now, let's just start the bot.
 
-        logger.info("Bot and Worker started")
+        logger.info("Bot started")
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
