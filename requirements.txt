@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+aiogram
+opencv-python-headless
+openai-whisper
+sqlalchemy
+aiosqlite
+python-multipart
+pydantic-settings
+python-dotenv
+moviepy
+scipy
+numpy
+tqdm
+librosa

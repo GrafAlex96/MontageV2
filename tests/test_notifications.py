@@ -1,0 +1,22 @@
+import pytest
+from unittest.mock import AsyncMock, patch
+from app.services.notifications import NotificationService
+from app.db.models import Job, User
+
+@pytest.mark.anyio
+async def test_send_progress_update():
+    bot = AsyncMock()
+    service = NotificationService(bot)
+
+    from app.db.session import async_session
+    async with async_session() as session:
+        user = User(telegram_id=111, username="notif_test")
+        session.add(user)
+        await session.flush()
+        job = Job(id=10, user_id=user.id)
+        session.add(job)
+        await session.commit()
+
+    await service.send_progress_update(10, 0.25)
+    bot.send_message.assert_called_once()
+    assert "25%" in bot.send_message.call_args[0][1]
