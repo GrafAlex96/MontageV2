@@ -17,7 +17,7 @@ class TimelineManager:
     def build_combined_timeline_from_items(self, candidate_items: List[Dict], clip_beats: Dict[str, List[float]] = None) -> List[Dict]:
         """
         Build the final timeline using candidates selected by Master Editor.
-        Candidate items are already ordered (Hook first).
+        Implements a deterministic retry strategy ladder.
         """
         import copy
         selected_timeline = []
@@ -27,52 +27,70 @@ class TimelineManager:
         min_dur = self.editing_rules.get('cut_rules', {}).get('min_duration', 1.0)
         max_dur = self.editing_rules.get('cut_rules', {}).get('max_duration', 5.0)
 
-        # Deterministic variation based on attempt
-        processed_candidates = candidate_items
-        if self.attempt == 1:
-            # Attempt 2: reverse order of non-hook scenes
-            hook = candidate_items[0]
-            others = candidate_items[1:]
-            processed_candidates = [hook] + list(reversed(others))
-        elif self.attempt == 2:
-            # Attempt 3: Shuffle slightly or pick different top ones?
-            # Let's just sort by movement score instead of original score
-            hook = candidate_items[0]
-            others = candidate_items[1:]
-            others.sort(key=lambda x: x['scene'].movement_score, reverse=True)
-            processed_candidates = [hook] + others
+        # --- RETRY STRATEGY LADDER ---
+        processed_candidates = [copy.deepcopy(i) for i in candidate_items]
+
+        if self.attempt == 1: # Boost hook weight
+            for i in processed_candidates:
+                if i['scene'].is_hook: i['scene'].score *= 1.5
+            processed_candidates.sort(key=lambda x: x['scene'].score, reverse=True)
+
+        elif self.attempt == 2: # Boost peak weight
+            for i in processed_candidates:
+                if i['scene'].is_peak: i['scene'].score *= 1.5
+            processed_candidates.sort(key=lambda x: x['scene'].score, reverse=True)
+
+        elif self.attempt == 3: # Shorten cuts (-20%)
+            min_dur *= 0.8
+            max_dur *= 0.8
+
+        elif self.attempt == 4: # Re-order by motion intensity
+            processed_candidates.sort(key=lambda x: x['scene'].movement_score, reverse=True)
+
+        elif self.attempt >= 5: # Fallback: disable beat sync (handled via clip_beats = None)
+            clip_beats = None
+
+        # Re-ensure hook is first after any re-sorting
+        hooks = [i for i in processed_candidates if i['scene'].is_hook]
+        non_hooks = [i for i in processed_candidates if not i['scene'].is_hook]
+        if hooks:
+            processed_candidates = [hooks[0]] + [h for h in hooks[1:]] + non_hooks
+
+        # Global timeline cursor to prevent gaps or overlaps
+        cumulative_cursor = 0.0
 
         for item in processed_candidates:
             item_copy = {
                 'path': item['path'],
-                'scene': copy.copy(item['scene'])
+                'scene': copy.deepcopy(item['scene']) # Deep copy to be safe
             }
             scene = item_copy['scene']
 
-            duration = min(max(scene.end_time - scene.start_time, min_dur), max_dur)
+            # 1. Clamp scene duration to rules
+            original_duration = scene.end_time - scene.start_time
+            duration = min(max(original_duration, min_dur), max_dur)
             scene.end_time = scene.start_time + duration
 
-            # Individual beat-sync for this clip if beats are provided
+            # 2. Individual beat-sync for this clip
             if clip_beats and item['path'] in clip_beats:
                 beats = clip_beats[item['path']]
                 if beats:
-                    scene = self._sync_scene_to_beats(scene, beats, current_total_duration)
+                    scene = self._sync_scene_to_beats(scene, beats, cumulative_cursor)
                     duration = scene.end_time - scene.start_time
 
-            if current_total_duration + duration <= self.target_duration:
+            # 3. Add to timeline if within total target
+            if cumulative_cursor + duration <= self.target_duration:
+                scene.timeline_offset = cumulative_cursor
                 selected_timeline.append(item_copy)
-                current_total_duration += duration
-            elif current_total_duration < self.target_duration:
-                remaining = self.target_duration - current_total_duration
-                if remaining > 0.5:
-                    item_copy = {
-                        'path': item['path'],
-                        'scene': copy.copy(item['scene'])
-                    }
-                    scene = item_copy['scene']
+                cumulative_cursor += duration
+            elif cumulative_cursor < self.target_duration:
+                # Final filling segment
+                remaining = self.target_duration - cumulative_cursor
+                if remaining > 0.3: # Minimum useful short segment
                     scene.end_time = scene.start_time + remaining
+                    scene.timeline_offset = cumulative_cursor
                     selected_timeline.append(item_copy)
-                    current_total_duration += remaining
+                    cumulative_cursor += remaining
 
             if current_total_duration >= self.target_duration:
                 break

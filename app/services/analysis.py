@@ -16,6 +16,8 @@ class Scene:
     is_hook: bool = False
     is_peak: bool = False
     audio_energy: float = 0.0
+    source_video_id: str = "" # UUID or Path
+    timeline_offset: float = 0.0
 
 class VideoAnalyzer:
     def __init__(self, video_path: str):
@@ -64,9 +66,10 @@ class VideoAnalyzer:
         return scenes
 
     def analyze_movement(self, scenes: List[Scene]) -> List[Scene]:
-        """Analyze movement in each scene using optical flow or frame differencing."""
+        """Analyze movement in each scene using frame differencing (Memory efficient)."""
         cap = cv2.VideoCapture(self.video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0: fps = 30.0
 
         for scene in scenes:
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(scene.start_time * fps))
@@ -77,9 +80,9 @@ class VideoAnalyzer:
             movements = []
 
             frames_to_check = int((scene.end_time - scene.start_time) * fps)
-            # Check up to 30 frames per scene to save time
             step = max(1, frames_to_check // 30)
 
+            # Use small buffer for chunk-based movement analysis
             for i in range(0, frames_to_check, step):
                 ret, frame = cap.read()
                 if not ret: break
@@ -89,6 +92,11 @@ class VideoAnalyzer:
                 movement = np.mean(flow)
                 movements.append(movement)
                 prev_gray = curr_gray
+
+                # Proactive cleanup within the loop
+                if i % 10 == 0:
+                    del frame
+                    del curr_gray
 
             scene.movement_score = float(np.mean(movements)) if movements else 0.0
 

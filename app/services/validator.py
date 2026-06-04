@@ -34,4 +34,14 @@ class FinalValidator:
         if width != 1080 or height != 1920:
              return {"valid": False, "error": f"Resolution mismatch: {width}x{height}"}
 
+        # 4. Check for frame corruption (Silent Corruption check)
+        # We check if frame count is reasonable for duration
+        fps_str = video_stream.get('avg_frame_rate', '30/1')
+        fps = eval(fps_str) if '/' in fps_str else float(fps_str)
+        expected_frames = int(actual_duration * fps)
+        actual_frames = int(video_stream.get('nb_frames', 0))
+
+        if actual_frames > 0 and abs(actual_frames - expected_frames) > fps * 2: # 2 second tolerance
+            return {"valid": False, "error": f"Frame count integrity failure: {actual_frames} vs {expected_frames}"}
+
         return {"valid": True, "duration": actual_duration, "resolution": f"{width}x{height}"}

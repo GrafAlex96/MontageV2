@@ -200,6 +200,19 @@ class VideoWorker:
                     logger.error(f"Final validation failed for job {job_id}: {validation['error']}", extra={"trace_id": job.trace_id})
                     raise VideoEditorError(f"Validation failed: {validation['error']}")
 
+                # --- Quality Regression Check ---
+                # Re-score rendered video for visual quality
+                post_analyzer = VideoAnalyzer(final_output_path)
+                post_scenes = post_analyzer.detect_scenes()
+                post_scenes = post_analyzer.analyze_movement(post_scenes)
+                post_scores = self.quality_gate.calculate_scores([{'scene': s} for s in post_scenes])
+
+                regression = self.quality_gate.calculate_regression(scores, post_scores)
+                if regression['is_degraded']:
+                    logger.warning(f"Quality degradation detected for job {job_id}: {regression['drops']}", extra={"trace_id": job.trace_id})
+                    # In production, we might trigger a re-render or re-edit here
+                # --- End Regression Check ---
+
                 # 7. Deliver
                 user = session.execute(select(User).where(User.id == job.user_id)).scalar_one()
 
