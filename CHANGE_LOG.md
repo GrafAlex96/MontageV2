@@ -24,3 +24,8 @@
 | 1.2.2 | 2026-06-03 | app/services/renderer.py, analysis.py | Optimization | Final Stabilization | Quality | Support 2GB+ files | Low | Verified |
 | 1.2.3 | 2026-06-03 | CHANGE_LOG.md | Optimization | Unified Change Log | Compliance | Auditability | Low | Verified |
 | 2.0.0 | 2026-06-03 | app/db/session.py, handlers, workers | Architectural Fix | Sync Architecture Unification | Stability | Removed async/sync DB conflicts | Medium | Verified |
+| 2.1.0 | 2026-06-03 | app/services/timeline.py | Fix | Scene Object Protection | Stability | Prevent mutation side effects | Low | Verified |
+| 2.1.1 | 2026-06-03 | app/workers/video_worker.py | Fix | Multi-Video Subtitles | Stability | Support subtitles from all source clips | Medium | Verified |
+| 2.1.2 | 2026-06-03 | app/workers/video_worker.py, timeline.py | Fix | Global Beat Detection | Stability | Per-clip beat detection and sync | Medium | Verified |
+| 2.1.3 | 2026-06-03 | app/workers/video_worker.py, timeline.py | Fix | Deterministic Quality Retries | Stability | Varied strategies for quality gate retries | Low | Verified |
+| 2.2.0 | 2026-06-03 | app/workers/video_worker.py | Optimization | Large File Resource Mgmt | Stability | Explicit GC and multi-video subtitle merge | Low | Verified |

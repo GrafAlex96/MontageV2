@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     TARGET_WIDTH: int = 1080
     TARGET_HEIGHT: int = 1920
     TARGET_FPS: int = 30
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # Admin settings
     ADMIN_API_KEY: str = "admin_secret_key"

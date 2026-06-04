@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import os
+import gc
+from typing import List, Dict
 from sqlalchemy import select, update
+from aiogram import Bot, types
 from app.db.session import get_db
 from app.db.models import Job, JobStatus, User, UploadedFile, RenderHistory
 from app.services.analysis import VideoAnalyzer
@@ -18,11 +21,9 @@ from app.agents.director_agent import DirectorAgent
 from app.agents.master_editor import MasterEditor
 from app.agents.editing_presets import EditingPresets
 from app.core.config import settings
-from aiogram import Bot
+from app.core.exceptions import VideoEditorError, ErrorCategory
 
 logger = logging.getLogger(__name__)
-
-from app.core.exceptions import VideoEditorError, ErrorCategory
 
 class VideoWorker:
     def __init__(self, bot: Bot):
@@ -77,6 +78,8 @@ class VideoWorker:
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
                     self._update_progress(job_id, progress)
+                    # Explicit cleanup for large files
+                    gc.collect()
 
                 # 3. Consolidated Master Pipeline
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
@@ -103,13 +106,17 @@ class VideoWorker:
 
                 timeline_manager = TimelineManager(target_duration=job.target_duration, editing_rules=editing_rules)
 
-                # Detect beats for beat-sync (on first clip)
-                beats = []
-                if clips:
-                    beats = self.audio_service.detect_beats(clips[0].path)
+                # Detect beats for beat-sync (Per source file)
+                clip_beats = {}
+                for clip in clips:
+                    logger.info(f"Detecting beats for {clip.path}", extra={"trace_id": job.trace_id})
+                    clip_beats[clip.path] = self.audio_service.detect_beats(clip.path)
 
                 # Get candidates from Master Editor decision
-                timeline = timeline_manager.build_combined_timeline_from_items(final_strategy["final_timeline"], beats=beats)
+                timeline = timeline_manager.build_combined_timeline_from_items(
+                    final_strategy["final_timeline"],
+                    clip_beats=clip_beats
+                )
 
                 # Quality Gate Check with Automatic Re-edit Loop
                 max_retries = 3
@@ -122,18 +129,49 @@ class VideoWorker:
 
                     if attempt < max_retries - 1:
                         logger.warning(f"Quality scores too low, attempting re-edit...", extra={"trace_id": job.trace_id})
-                        timeline = timeline_manager.build_combined_timeline_from_items(final_strategy["final_timeline"], beats=beats)
+                        # Re-initialize timeline manager with current attempt for variation
+                        timeline_manager = TimelineManager(
+                            target_duration=job.target_duration,
+                            editing_rules=editing_rules,
+                            attempt=attempt + 1
+                        )
+                        timeline = timeline_manager.build_combined_timeline_from_items(
+                            final_strategy["final_timeline"],
+                            clip_beats=clip_beats
+                        )
                     else:
                         logger.error(f"Failed to reach quality targets after {max_retries} attempts. Proceeding.", extra={"trace_id": job.trace_id})
 
-                # 4. Transcription
-                subtitles = []
-                if clips:
-                    try:
-                        subtitles = self.subtitle_service.transcribe(clips[0].path)
-                    except Exception as e:
-                        logger.error(f"Transcription failed: {e}", extra={"trace_id": job.trace_id})
-                        # Fallback: continue without subtitles
+                # 4. Transcription (Multi-video support)
+                all_subtitles = []
+                current_timeline_offset = 0.0
+                transcription_cache = {}
+
+                try:
+                    # Collect and offset subtitles for all clips in the final timeline
+                    for item in timeline:
+                        path = item['path']
+                        scene = item['scene']
+
+                        # Optimization: cache transcriptions per path during this job
+                        if path not in transcription_cache:
+                            transcription_cache[path] = self.subtitle_service.transcribe(path)
+
+                        clip_subs = transcription_cache[path]
+
+                        # Filter subtitles that fall within the scene range and offset them
+                        for sub in clip_subs:
+                            if sub['start'] >= scene.start_time and sub['end'] <= scene.end_time:
+                                sub_copy = sub.copy()
+                                sub_copy['start'] = sub['start'] - scene.start_time + current_timeline_offset
+                                sub_copy['end'] = sub['end'] - scene.start_time + current_timeline_offset
+                                all_subtitles.append(sub_copy)
+
+                        current_timeline_offset += (scene.end_time - scene.start_time)
+
+                except Exception as e:
+                    logger.error(f"Multi-video transcription failed: {e}", extra={"trace_id": job.trace_id})
+                    # Fallback: continue with empty or partial subtitles
 
                 await self._update_progress(job_id, 0.6)
 
@@ -144,9 +182,10 @@ class VideoWorker:
                 output_filename = f"final_{job_id}.mp4"
                 output_path = os.path.join(settings.TEMP_STORAGE_PATH, output_filename)
 
-                self.renderer.render_final_video(timeline, subtitles, output_path)
+                self.renderer.render_final_video(timeline, all_subtitles, output_path)
 
                 self._update_progress(job_id, 0.8)
+                gc.collect()
 
                 # 6. Audio Optimization
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.POST_PROCESSING))
@@ -198,8 +237,6 @@ class VideoWorker:
         # VideoWorker is already async, so this is fine.
         import asyncio
         asyncio.create_task(self.notifier.send_progress_update(job_id, progress))
-
-from aiogram import types
 
 # Task for RQ
 def process_job_task(job_id: int):
