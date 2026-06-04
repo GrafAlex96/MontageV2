@@ -50,14 +50,15 @@ class Renderer:
 
         try:
             # Single user mode: prefer quality over speed
-            with timeout(600): # Extended timeout for high quality
+            timeout_sec = settings.RENDER_TIMEOUT
+            with timeout(timeout_sec):
                 final_clip.write_videofile(
                     output_path,
                     fps=self.fps,
                     codec="libx264",
                     audio_codec="aac",
-                    bitrate="5000k", # High bitrate for Instagram Reels
-                    preset="slow",   # Better compression quality
+                    bitrate="5000k",
+                    preset="medium" if settings.SAFE_MODE else "slow", # Faster in safe mode
                     temp_audiofile=f"temp-audio-{os.getpid()}.m4a",
                     remove_temp=True,
                     logger=None

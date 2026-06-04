@@ -29,6 +29,9 @@
 | 2.1.2 | 2026-06-03 | app/workers/video_worker.py, timeline.py | Fix | Global Beat Detection | Stability | Per-clip beat detection and sync | Medium | Verified |
 | 2.1.3 | 2026-06-03 | app/workers/video_worker.py, timeline.py | Fix | Deterministic Quality Retries | Stability | Varied strategies for quality gate retries | Low | Verified |
 | 2.2.0 | 2026-06-03 | app/workers/video_worker.py | Optimization | Large File Resource Mgmt | Stability | Explicit GC and multi-video subtitle merge | Low | Verified |
+| 2.5.0 | 2026-06-03 | app/core/config.py, workers/video_worker.py | Security | Safe Mode & Resource Limits | Stability | Enforced memory/CPU limits for Codespaces | Low | Verified |
+| 2.5.1 | 2026-06-03 | app/services/renderer.py | Optimization | Render Stability | Stability | Adaptive presets and timeouts for SAFE_MODE | Low | Verified |
+| 2.5.2 | 2026-06-03 | app/services/quality_gate.py | Fix | Quality Hardening | Stability | Reduced retries and enforced regression checks | Low | Verified |
 | 2.3.0 | 2026-06-03 | app/services/analysis.py | Optimization | Streaming Analysis | Stability | Chunk-based processing for large files | Low | Verified |
 | 2.3.1 | 2026-06-03 | app/services/timeline.py | Feature | Retry Strategy Ladder | Quality | Incremental strategy shifts for retries | Low | Verified |
 | 2.3.2 | 2026-06-03 | app/services/quality_gate.py, video_worker.py | Feature | Quality Regression Check | Stability | Detect degradation after render | Low | Verified |

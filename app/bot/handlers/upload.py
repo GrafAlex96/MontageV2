@@ -33,8 +33,9 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
     if not message.video or message.video.mime_type not in ['video/mp4', 'video/quicktime', 'video/x-matroska']:
         return await message.answer("Unsupported file format. Please send MP4, MOV or MKV.")
 
-    if message.video.file_size > 2 * 1024 * 1024 * 1024: # 2GB
-        return await message.answer("File is too large. Maximum size is 2GB.")
+    max_size_bytes = settings.MAX_VIDEO_SIZE_GB * 1024 * 1024 * 1024
+    if message.video.file_size > max_size_bytes:
+        return await message.answer(f"File is too large. Maximum size is {settings.MAX_VIDEO_SIZE_GB}GB.")
 
     # Get or create active job in FSM
     data = await state.get_data()
@@ -57,8 +58,8 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
             await state.update_data(active_job_id=job_id, file_count=0)
 
         file_count = data.get('file_count', 0) + 1
-        if file_count > 20:
-            return await message.answer("Maximum 20 videos allowed.")
+        if file_count > settings.MAX_CLIPS_PER_JOB:
+            return await message.answer(f"Maximum {settings.MAX_CLIPS_PER_JOB} videos allowed in SAFE MODE.")
 
         # 2. Path Traversal Protection
         file_id = message.video.file_id

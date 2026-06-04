@@ -21,8 +21,12 @@ class AudioService:
         """Detect beats in the audio file using librosa with fallback."""
         import librosa
         import numpy as np
+        from app.core.config import settings
+
         try:
-            y, sr = librosa.load(input_path, sr=None)
+            # Safe mode: reduced sampling for large files
+            sr_target = 22050 if settings.SAFE_MODE else None
+            y, sr = librosa.load(input_path, sr=sr_target)
             # Check if there is enough audio energy for beats
             if np.max(np.abs(y)) < 0.01:
                 return []

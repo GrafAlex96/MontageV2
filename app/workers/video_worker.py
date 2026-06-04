@@ -41,6 +41,12 @@ class VideoWorker:
     async def process_job(self, job_id: int):
         ResourceManager.cleanup_zombie_processes()
         ResourceManager.limit_resources()
+
+        # Performance check
+        if ResourceManager.get_cpu_usage() > settings.MAX_CPU_PERCENT:
+             logger.warning(f"CPU usage too high ({ResourceManager.get_cpu_usage()}%), delaying job {job_id}")
+             # In production with RQ, we might re-queue. Here we just log.
+
         with get_db() as session:
             job = session.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
 
@@ -78,7 +84,7 @@ class VideoWorker:
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
                     self._update_progress(job_id, progress)
-                    # Explicit cleanup for large files
+                    # Explicit cleanup for large files after analysis
                     gc.collect()
 
                 # 3. Consolidated Master Pipeline
@@ -119,7 +125,7 @@ class VideoWorker:
                 )
 
                 # Quality Gate Check with Automatic Re-edit Loop
-                max_retries = 3
+                max_retries = 2 # Reduced for Codespaces stability
                 for attempt in range(max_retries):
                     scores = self.quality_gate.calculate_scores(timeline)
                     logger.info(f"Quality scores for job {job_id} (Attempt {attempt+1}): {scores}", extra={"trace_id": job.trace_id})
@@ -173,9 +179,13 @@ class VideoWorker:
                     logger.error(f"Multi-video transcription failed: {e}", extra={"trace_id": job.trace_id})
                     # Fallback: continue with empty or partial subtitles
 
+                gc.collect() # Cleanup after transcription
                 await self._update_progress(job_id, 0.6)
 
                 # 5. Rendering
+                # Memory cleanup before heavy render
+                gc.collect()
+
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.RENDERING))
                 session.commit()
 
