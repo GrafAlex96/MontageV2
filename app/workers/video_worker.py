@@ -87,15 +87,6 @@ class VideoWorker:
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
                     self._update_progress(job_id, progress)
-                    # Explicit cleanup for large files after analysis
-                    gc.collect()
-
-                # 3. Consolidated Master Pipeline
-                # Memory cleanup before Master Editor
-                gc.collect()
-
-                session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
-                session.commit()
 
                 # 3. Consolidated Unified Pipeline
                 # Memory cleanup before heavy processing
@@ -203,6 +194,7 @@ class VideoWorker:
                 gc.collect()
 
                 # 6. Audio Optimization
+                ResourceManager.check_stage_budget("POST_PROCESSING", settings.MAX_RAM_MB)
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.POST_PROCESSING))
                 session.commit()
 

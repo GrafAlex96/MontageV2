@@ -78,11 +78,17 @@ class Renderer:
         except Exception as e:
             logger.error(f"Rendering failed or timed out: {e}")
             raise
-
-        # Close all clips
-        for clip in clips:
-            clip.close()
-        final_clip.close()
+        finally:
+            # Mandatory resource closure for Codespaces memory safety
+            for clip in clips:
+                try:
+                    clip.close()
+                except:
+                    pass
+            try:
+                final_clip.close()
+            except:
+                pass
 
     def _apply_zoom_interrupt(self, clip: VideoFileClip) -> VideoFileClip:
         """Apply a slight zoom pattern interrupt."""
