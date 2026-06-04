@@ -25,18 +25,18 @@ async def test_process_set_duration():
     from app.db.session import get_db
     with get_db() as session:
         # Create a user and job first
-        user = User(telegram_id=789, username="dur_test")
+        user = User(telegram_id=7899, username="dur_test_unique")
         session.add(user)
         session.flush()
-        job = Job(id=100, user_id=user.id) # Use higher ID to avoid conflict
+        job = Job(id=1001, user_id=user.id) # Use higher ID to avoid conflict
         session.add(job)
         session.commit()
 
-    callback.data = "set_dur_100_30"
+    callback.data = "set_dur_1001_30"
     await process_set_duration(callback, state)
 
     with get_db() as session:
-        stmt = select(Job).where(Job.id == 100)
+        stmt = select(Job).where(Job.id == 1001)
         res = session.execute(stmt)
         job = res.scalar_one()
         assert job.target_duration == 30

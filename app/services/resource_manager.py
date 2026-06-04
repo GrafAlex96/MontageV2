@@ -30,8 +30,13 @@ class ResourceManager:
     @staticmethod
     def limit_resources():
         """Set process limits for the current worker."""
-        # Simple implementation: log warning if system is overloaded
-        if ResourceManager.get_cpu_usage() > 90:
-            logger.warning("System CPU usage is extremely high!")
-        if ResourceManager.get_memory_usage() > 90:
-            logger.warning("System Memory usage is extremely high!")
+        cpu = ResourceManager.get_cpu_usage()
+        mem = ResourceManager.get_memory_usage()
+
+        if cpu > 95:
+            logger.error(f"System CPU critical ({cpu}%). Stopping current task.")
+            raise RuntimeError("CPU limit exceeded")
+
+        if mem > 90:
+            logger.error(f"System Memory critical ({mem}%). Stopping current task.")
+            raise RuntimeError("Memory limit exceeded")

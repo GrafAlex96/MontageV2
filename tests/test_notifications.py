@@ -10,13 +10,13 @@ async def test_send_progress_update():
 
     from app.db.session import get_db
     with get_db() as session:
-        user = User(telegram_id=111, username="notif_test")
+        user = User(telegram_id=1111, username="notif_test_unique")
         session.add(user)
         session.flush()
-        job = Job(id=10, user_id=user.id)
+        job = Job(id=1010, user_id=user.id)
         session.add(job)
         session.commit()
 
-    await service.send_progress_update(10, 0.25)
+    await service.send_progress_update(1010, 0.25)
     bot.send_message.assert_called_once()
     assert "25%" in bot.send_message.call_args[0][1]

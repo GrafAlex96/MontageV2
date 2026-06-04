@@ -16,10 +16,8 @@ from app.services.notifications import NotificationService
 from app.services.quality_gate import QualityGate
 from app.services.resource_manager import ResourceManager
 from app.services.validator import FinalValidator
-from app.agents.story_intelligence import StoryIntelligence
-from app.agents.director_agent import DirectorAgent
-from app.agents.master_editor import MasterEditor
-from app.agents.editing_presets import EditingPresets
+from app.core.orchestrator import PipelineOrchestrator
+from app.core.retry_engine import RetryEngine
 from app.core.config import settings
 from app.core.exceptions import VideoEditorError, ErrorCategory
 
@@ -33,10 +31,8 @@ class VideoWorker:
         self.renderer = Renderer()
         self.notifier = NotificationService(bot)
         self.quality_gate = QualityGate()
-        self.story_intel = StoryIntelligence()
-        self.director = DirectorAgent()
-        self.master_editor = MasterEditor()
-        self.presets = EditingPresets()
+        self.orchestrator = PipelineOrchestrator()
+        self.retry_engine = RetryEngine()
 
     async def process_job(self, job_id: int):
         ResourceManager.cleanup_zombie_processes()
@@ -100,74 +96,52 @@ class VideoWorker:
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
                 session.commit()
 
-                # --- NEW MASTER EDITOR PIPELINE (GLOBAL) ---
-                # Combine all scenes from all clips into items for Master Editor
-                all_items = []
-                for clip in clips:
-                    for scene in clip.scenes:
-                        all_items.append({'path': clip.path, 'scene': scene})
+                # 3. Consolidated Unified Pipeline
+                # Memory cleanup before heavy processing
+                gc.collect()
 
-                # Story intel from the first clip for overall theme
-                story_data = self.story_intel.analyze_content(clips[0].scenes if clips else [])
-                director_suggestions = self.director.suggest_strategy(story_data)
+                session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
+                session.commit()
 
-                final_strategy = self.master_editor.decide_final_strategy(
-                    story_data, director_suggestions, all_items
-                )
+                # STEP 1: Orchestrate
+                master_plan = self.orchestrator.create_master_plan(clips, job.target_duration)
+                strategy = master_plan["strategy"]
+                base_rules = master_plan["rules"]
 
-                editing_rules = self.presets.get_rules(final_strategy["final_preset"])
-                logger.info(f"Master Decision: {final_strategy['final_preset']}", extra={"trace_id": job.trace_id})
-                # --- END MASTER EDITOR PIPELINE ---
-
-                timeline_manager = TimelineManager(target_duration=job.target_duration, editing_rules=editing_rules)
-
-                # Detect beats for beat-sync (Per source file with confidence check)
+                # STEP 2: Detect beats
                 clip_beats = {}
                 for clip in clips:
-                    logger.info(f"Detecting beats for {clip.path}", extra={"trace_id": job.trace_id})
                     beat_data = self.audio_service.detect_beats(clip.path)
-                    # Only use beats if confidence is high enough (> 0.4)
                     if beat_data["confidence"] > 0.4:
                         clip_beats[clip.path] = beat_data["beats"]
-                    else:
-                        logger.info(f"Low beat confidence ({beat_data['confidence']}) for {clip.path}, disabling sync", extra={"trace_id": job.trace_id})
 
-                # Get candidates from Master Editor decision
-                timeline = timeline_manager.build_combined_timeline_from_items(
-                    final_strategy["final_timeline"],
-                    clip_beats=clip_beats
-                )
+                # STEP 3: Quality Retries Loop (Unified via RetryEngine)
+                best_timeline = None
+                best_score = -1.0
+                current_rules = base_rules
 
-                # Quality Gate Check with Automatic Re-edit Loop and Score Tracking
-                max_retries = 3
-                best_timeline = timeline
-                best_score = sum(self.quality_gate.calculate_scores(timeline).values())
+                for attempt in range(settings.MAX_RETRIES + 1):
+                    tm = TimelineManager(target_duration=job.target_duration, editing_rules=current_rules)
+                    # Note: RetryEngine handles strategy shifts, MasterEditor provides candidates
+                    current_timeline = tm.build_combined_timeline_from_items(
+                        strategy["final_timeline"],
+                        clip_beats=clip_beats if not current_rules.get('disable_sync') else None
+                    )
 
-                for attempt in range(max_retries):
-                    current_scores = self.quality_gate.calculate_scores(timeline)
-                    current_total_score = sum(current_scores.values())
-                    logger.info(f"Quality scores for job {job_id} (Attempt {attempt+1}): {current_scores}", extra={"trace_id": job.trace_id})
+                    current_scores = self.quality_gate.calculate_scores(current_timeline)
+                    current_total = sum(current_scores.values())
 
-                    if current_total_score > best_score:
-                        best_score = current_total_score
-                        best_timeline = timeline
+                    if current_total > best_score:
+                        best_score = current_total
+                        best_timeline = current_timeline
 
                     if self.quality_gate.is_production_ready(current_scores):
                         break
 
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Quality target not met, attempting re-edit variation {attempt+1}...", extra={"trace_id": job.trace_id})
-                        timeline_manager = TimelineManager(
-                            target_duration=job.target_duration,
-                            editing_rules=editing_rules,
-                            attempt=attempt + 1
-                        )
-                        timeline = timeline_manager.build_combined_timeline_from_items(
-                            final_strategy["final_timeline"],
-                            clip_beats=clip_beats
-                        )
-                    else:
-                        logger.error(f"Max retries reached. Using best available timeline.", extra={"trace_id": job.trace_id})
+                    if not self.retry_engine.should_continue(attempt + 1, current_total, best_score):
+                        break
+
+                    current_rules = self.retry_engine.get_retry_strategy(attempt + 1, base_rules)
 
                 timeline = best_timeline
 

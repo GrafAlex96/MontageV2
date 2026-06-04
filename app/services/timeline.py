@@ -16,52 +16,27 @@ class TimelineManager:
 
     def build_combined_timeline_from_items(self, candidate_items: List[Dict], clip_beats: Dict[str, List[float]] = None) -> List[Dict]:
         """
-        Build the final timeline using candidates selected by Master Editor.
-        Implements a deterministic retry strategy ladder with immutable Scene objects.
+        Pure functional timeline construction using candidates from Master Editor.
+        Implements strict cumulative cursor enforcement for multi-video integrity.
         """
-        import copy
         from dataclasses import replace
 
         selected_timeline = []
+        cumulative_cursor = 0.0
 
-        # Rule enforcement: Cut duration
+        # Rule enforcement: Technical constraints only
         min_dur = self.editing_rules.get('cut_rules', {}).get('min_duration', 1.0)
         max_dur = self.editing_rules.get('cut_rules', {}).get('max_duration', 5.0)
 
-        # --- RETRY STRATEGY LADDER ---
-        # Note: Scene is now frozen, so we create clones with replaced values
-        processed_candidates = []
-        for i in candidate_items:
-            scene = i['scene']
-            if self.attempt == 1 and scene.is_hook:
-                scene = replace(scene, score=scene.score * 1.5)
-            elif self.attempt == 2 and scene.is_peak:
-                scene = replace(scene, score=scene.score * 1.5)
-            processed_candidates.append({'path': i['path'], 'scene': scene})
+        # Global beat reference strategy: use the first clip with valid beats as master reference
+        global_beats = []
+        if clip_beats:
+            for path, beats in clip_beats.items():
+                if beats:
+                    global_beats = beats
+                    break
 
-        if self.attempt in [1, 2]:
-            processed_candidates.sort(key=lambda x: x['scene'].score, reverse=True)
-
-        if self.attempt == 3: # Shorten cuts (-20%)
-            min_dur *= 0.8
-            max_dur *= 0.8
-
-        elif self.attempt == 4: # Re-order by motion intensity
-            processed_candidates.sort(key=lambda x: x['scene'].movement_score, reverse=True)
-
-        elif self.attempt >= 5: # Fallback: disable beat sync
-            clip_beats = None
-
-        # Re-ensure hook is first after any re-sorting
-        hooks = [i for i in processed_candidates if i['scene'].is_hook]
-        non_hooks = [i for i in processed_candidates if not i['scene'].is_hook]
-        if hooks:
-            processed_candidates = [hooks[0]] + [h for h in hooks[1:]] + non_hooks
-
-        # Global timeline cursor to prevent gaps or overlaps
-        cumulative_cursor = 0.0
-
-        for item in processed_candidates:
+        for item in candidate_items:
             scene = item['scene']
 
             # 1. Clamp scene duration to rules
@@ -71,12 +46,10 @@ class TimelineManager:
             # Update duration by creating a new scene object (immutable pattern)
             scene = replace(scene, end_time=scene.start_time + duration)
 
-            # 2. Individual beat-sync for this clip
-            if clip_beats and item['path'] in clip_beats:
-                beats = clip_beats[item['path']]
-                if beats:
-                    scene = self._sync_scene_to_beats(scene, beats, cumulative_cursor)
-                    duration = scene.end_time - scene.start_time
+            # 2. Global-anchored beat-sync
+            if global_beats:
+                scene = self._sync_scene_to_beats(scene, global_beats, cumulative_cursor)
+                duration = scene.end_time - scene.start_time
 
             # 3. Add to timeline if within total target
             if cumulative_cursor + duration <= self.target_duration:

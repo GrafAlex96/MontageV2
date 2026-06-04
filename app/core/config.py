@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     MAX_CPU_PERCENT: float = 80.0
     MAX_RAM_MB: int = 2000
     RENDER_TIMEOUT: int = 180
+    MAX_RETRIES: int = 2
     FFMPEG_KILL_TIMEOUT: int = 90
 
     # MODES

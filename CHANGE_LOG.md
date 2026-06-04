@@ -31,6 +31,10 @@
 | 2.2.0 | 2026-06-03 | app/workers/video_worker.py | Optimization | Large File Resource Mgmt | Stability | Explicit GC and multi-video subtitle merge | Low | Verified |
 | 2.6.0 | 2026-06-03 | Multiple | Optimization | Codespaces Stabilization | Stability | Standardized .env, startup script, and memory guards | Low | Verified |
 | 2.7.0 | 2026-06-03 | Multiple | Optimization | Final Production Hardening | Stability | Immutable Scene objects, beat confidence, and quality retries | Low | Verified |
+| 3.0.0 | 2026-06-03 | app/core/orchestrator.py | Architectural Fix | Pipeline Unification | Stability | Single authority Control Layer implemented | Medium | Verified |
+| 3.1.0 | 2026-06-03 | app/core/retry_engine.py | Feature | Unified Retry Engine | Quality | Single source of truth for deterministic retries | Low | Verified |
+| 3.2.0 | 2026-06-03 | app/services/timeline.py | Architectural Fix | Pure Functional Timeline | Stability | Enforced immutability and global beat-sync | Low | Verified |
+| 3.3.0 | 2026-06-03 | app/services/resource_manager.py | Optimization | Hard Resource Guards | Stability | Immediate task termination on CPU/RAM overflow | Low | Verified |
 | 2.5.0 | 2026-06-03 | app/core/config.py, workers/video_worker.py | Security | Safe Mode & Resource Limits | Stability | Enforced memory/CPU limits for Codespaces | Low | Verified |
 | 2.5.1 | 2026-06-03 | app/services/renderer.py | Optimization | Render Stability | Stability | Adaptive presets and timeouts for SAFE_MODE | Low | Verified |
 | 2.5.2 | 2026-06-03 | app/services/quality_gate.py | Fix | Quality Hardening | Stability | Reduced retries and enforced regression checks | Low | Verified |
