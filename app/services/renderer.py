@@ -52,13 +52,25 @@ class Renderer:
             # Single user mode: prefer quality over speed
             timeout_sec = settings.RENDER_TIMEOUT
             with timeout(timeout_sec):
+                # Fallback preset logic for Codespaces
+                current_preset = "medium"
+                if settings.SAFE_MODE:
+                    # Check CPU load before choosing preset
+                    import psutil
+                    if psutil.cpu_percent() > 80:
+                         current_preset = "ultrafast" # High load fallback
+                    else:
+                         current_preset = "medium"
+                else:
+                    current_preset = "slow"
+
                 final_clip.write_videofile(
                     output_path,
                     fps=self.fps,
                     codec="libx264",
                     audio_codec="aac",
                     bitrate="5000k",
-                    preset="medium" if settings.SAFE_MODE else "slow", # Faster in safe mode
+                    preset=current_preset,
                     temp_audiofile=f"temp-audio-{os.getpid()}.m4a",
                     remove_temp=True,
                     logger=None

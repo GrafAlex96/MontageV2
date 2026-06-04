@@ -34,7 +34,11 @@ class FinalValidator:
         if width != 1080 or height != 1920:
              return {"valid": False, "error": f"Resolution mismatch: {width}x{height}"}
 
-        # 4. Check for frame corruption (Silent Corruption check)
+        # 4. Check for Audio Stream
+        if not next((s for s in data['streams'] if s['codec_type'] == 'audio'), None):
+            return {"valid": False, "error": "No audio stream found in final output"}
+
+        # 5. Check for frame corruption (Silent Corruption check)
         # We check if frame count is reasonable for duration
         fps_str = video_stream.get('avg_frame_rate', '30/1')
         fps = eval(fps_str) if '/' in fps_str else float(fps_str)

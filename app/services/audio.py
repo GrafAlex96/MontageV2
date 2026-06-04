@@ -1,7 +1,7 @@
 import subprocess
 import os
 import logging
-from typing import List
+from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,8 @@ class AudioService:
         ]
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    def detect_beats(self, input_path: str) -> List[float]:
-        """Detect beats in the audio file using librosa with fallback."""
+    def detect_beats(self, input_path: str) -> Dict[str, Any]:
+        """Detect beats and return with confidence score."""
         import librosa
         import numpy as np
         from app.core.config import settings
@@ -27,20 +27,38 @@ class AudioService:
             # Safe mode: reduced sampling for large files
             sr_target = 22050 if settings.SAFE_MODE else None
             y, sr = librosa.load(input_path, sr=sr_target)
-            # Check if there is enough audio energy for beats
-            if np.max(np.abs(y)) < 0.01:
-                return []
 
+            # 1. Energy check
+            max_amp = np.max(np.abs(y))
+            if max_amp < 0.02:
+                return {"beats": [], "confidence": 0.0}
+
+            # 2. Beat track
             tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-            # Confidence check: if tempo is very low or high, it might be noise/speech
-            if tempo < 40 or tempo > 220:
-                return []
-
             beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-            return [float(t) for t in beat_times]
+
+            # 3. Simple Confidence Heuristic
+            # If tempo is stable and in musical range
+            confidence = 0.0
+            if 60 <= tempo <= 180:
+                confidence = 0.8
+            elif 40 <= tempo <= 220:
+                confidence = 0.5
+
+            # Deduct if audio is very noisy or has low rhythmic peaks
+            onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+            pulse = librosa.beat.plp(onset_envelope=onset_env, sr=sr)
+            if np.mean(pulse) < 0.1:
+                confidence *= 0.5
+
+            return {
+                "beats": [float(t) for t in beat_times],
+                "confidence": confidence,
+                "tempo": float(tempo)
+            }
         except Exception as e:
             logger.warning(f"Beat detection failed: {e}")
-            return []
+            return {"beats": [], "confidence": 0.0}
 
     def remove_noise(self, input_path: str, output_path: str):
         """Apply noise reduction using afftdn filter."""

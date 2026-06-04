@@ -121,11 +121,16 @@ class VideoWorker:
 
                 timeline_manager = TimelineManager(target_duration=job.target_duration, editing_rules=editing_rules)
 
-                # Detect beats for beat-sync (Per source file)
+                # Detect beats for beat-sync (Per source file with confidence check)
                 clip_beats = {}
                 for clip in clips:
                     logger.info(f"Detecting beats for {clip.path}", extra={"trace_id": job.trace_id})
-                    clip_beats[clip.path] = self.audio_service.detect_beats(clip.path)
+                    beat_data = self.audio_service.detect_beats(clip.path)
+                    # Only use beats if confidence is high enough (> 0.4)
+                    if beat_data["confidence"] > 0.4:
+                        clip_beats[clip.path] = beat_data["beats"]
+                    else:
+                        logger.info(f"Low beat confidence ({beat_data['confidence']}) for {clip.path}, disabling sync", extra={"trace_id": job.trace_id})
 
                 # Get candidates from Master Editor decision
                 timeline = timeline_manager.build_combined_timeline_from_items(
@@ -133,18 +138,25 @@ class VideoWorker:
                     clip_beats=clip_beats
                 )
 
-                # Quality Gate Check with Automatic Re-edit Loop
-                max_retries = 2 # Reduced for Codespaces stability
-                for attempt in range(max_retries):
-                    scores = self.quality_gate.calculate_scores(timeline)
-                    logger.info(f"Quality scores for job {job_id} (Attempt {attempt+1}): {scores}", extra={"trace_id": job.trace_id})
+                # Quality Gate Check with Automatic Re-edit Loop and Score Tracking
+                max_retries = 3
+                best_timeline = timeline
+                best_score = sum(self.quality_gate.calculate_scores(timeline).values())
 
-                    if self.quality_gate.is_production_ready(scores):
+                for attempt in range(max_retries):
+                    current_scores = self.quality_gate.calculate_scores(timeline)
+                    current_total_score = sum(current_scores.values())
+                    logger.info(f"Quality scores for job {job_id} (Attempt {attempt+1}): {current_scores}", extra={"trace_id": job.trace_id})
+
+                    if current_total_score > best_score:
+                        best_score = current_total_score
+                        best_timeline = timeline
+
+                    if self.quality_gate.is_production_ready(current_scores):
                         break
 
                     if attempt < max_retries - 1:
-                        logger.warning(f"Quality scores too low, attempting re-edit...", extra={"trace_id": job.trace_id})
-                        # Re-initialize timeline manager with current attempt for variation
+                        logger.warning(f"Quality target not met, attempting re-edit variation {attempt+1}...", extra={"trace_id": job.trace_id})
                         timeline_manager = TimelineManager(
                             target_duration=job.target_duration,
                             editing_rules=editing_rules,
@@ -155,7 +167,9 @@ class VideoWorker:
                             clip_beats=clip_beats
                         )
                     else:
-                        logger.error(f"Failed to reach quality targets after {max_retries} attempts. Proceeding.", extra={"trace_id": job.trace_id})
+                        logger.error(f"Max retries reached. Using best available timeline.", extra={"trace_id": job.trace_id})
+
+                timeline = best_timeline
 
                 # 4. Transcription (Multi-video support)
                 all_subtitles = []

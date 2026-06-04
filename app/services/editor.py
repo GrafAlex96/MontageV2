@@ -39,6 +39,7 @@ class Editor:
         remaining_scenes = [s for s in scenes if s != selected_hook]
         remaining_scenes.sort(key=lambda x: x.score, reverse=True)
 
+        from dataclasses import replace
         for scene in remaining_scenes:
             if current_duration >= self.target_duration:
                 break
@@ -50,9 +51,7 @@ class Editor:
             else:
                 remaining = self.target_duration - current_duration
                 if remaining > 1.0:
-                    import copy
-                    scene_copy = copy.copy(scene)
-                    scene_copy.end_time = scene_copy.start_time + remaining
+                    scene_copy = replace(scene, end_time=scene.start_time + remaining)
                     structure.append(scene_copy)
                     current_duration += remaining
 

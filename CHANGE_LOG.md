@@ -30,6 +30,7 @@
 | 2.1.3 | 2026-06-03 | app/workers/video_worker.py, timeline.py | Fix | Deterministic Quality Retries | Stability | Varied strategies for quality gate retries | Low | Verified |
 | 2.2.0 | 2026-06-03 | app/workers/video_worker.py | Optimization | Large File Resource Mgmt | Stability | Explicit GC and multi-video subtitle merge | Low | Verified |
 | 2.6.0 | 2026-06-03 | Multiple | Optimization | Codespaces Stabilization | Stability | Standardized .env, startup script, and memory guards | Low | Verified |
+| 2.7.0 | 2026-06-03 | Multiple | Optimization | Final Production Hardening | Stability | Immutable Scene objects, beat confidence, and quality retries | Low | Verified |
 | 2.5.0 | 2026-06-03 | app/core/config.py, workers/video_worker.py | Security | Safe Mode & Resource Limits | Stability | Enforced memory/CPU limits for Codespaces | Low | Verified |
 | 2.5.1 | 2026-06-03 | app/services/renderer.py | Optimization | Render Stability | Stability | Adaptive presets and timeouts for SAFE_MODE | Low | Verified |
 | 2.5.2 | 2026-06-03 | app/services/quality_gate.py | Fix | Quality Hardening | Stability | Reduced retries and enforced regression checks | Low | Verified |

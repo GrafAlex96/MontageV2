@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import subprocess
 import json
 
-@dataclass
+@dataclass(frozen=True)
 class Scene:
     start_time: float
     end_time: float
@@ -144,25 +144,36 @@ class VideoAnalyzer:
 
     def detect_hooks_and_peaks(self, scenes: List[Scene]) -> List[Scene]:
         """Identify scenes that can serve as hooks or emotional peaks."""
+        from dataclasses import replace
         if not scenes: return scenes
 
-        # Hooks: High movement OR high audio energy at the beginning
-        # Peaks: Highest combined movement and audio energy
-
+        # 1. Identify peaks
+        cloned_scenes = []
         for scene in scenes:
             combined_intensity = scene.movement_score * 0.5 + scene.audio_energy * 50.0
             if combined_intensity > 5.0: # Arbitrary threshold
-                scene.is_peak = True
+                scene = replace(scene, is_peak=True)
+            cloned_scenes.append(scene)
 
-        # Sort by intensity to find the best hook
-        sorted_by_intensity = sorted(scenes, key=lambda x: x.movement_score * 0.5 + x.audio_energy * 50.0, reverse=True)
+        # 2. Identify best hook
+        sorted_by_intensity = sorted(cloned_scenes, key=lambda x: x.movement_score * 0.5 + x.audio_energy * 50.0, reverse=True)
         if sorted_by_intensity:
-            sorted_by_intensity[0].is_hook = True
+            best_hook = sorted_by_intensity[0]
+            # Replace the hook scene in the cloned list
+            final_scenes = []
+            for s in cloned_scenes:
+                if s == best_hook:
+                    final_scenes.append(replace(s, is_hook=True))
+                else:
+                    final_scenes.append(s)
+            return final_scenes
 
-        return scenes
+        return cloned_scenes
 
     def generate_quality_scores(self, scenes: List[Scene], silences: List[Dict[str, float]]) -> List[Scene]:
         """Generate quality scores for each scene based on movement, audio, and presence of silence."""
+        from dataclasses import replace
+        scored_scenes = []
         for scene in scenes:
             # Base score from movement and audio
             score = min(scene.movement_score * 2.0 + scene.audio_energy * 100.0, 10.0)
@@ -174,8 +185,6 @@ class VideoAnalyzer:
             # Penalize for overlapping with silence
             silence_penalty = 0
             for silence in silences:
-                # Calculate overlap between scene [scene.start_time, scene.end_time]
-                # and silence [silence['start'], silence['end']]
                 silence_start = silence['start']
                 silence_end = silence.get('end', scene.end_time)
 
@@ -188,7 +197,7 @@ class VideoAnalyzer:
                     if scene_duration > 0:
                         silence_penalty += (overlap_duration / scene_duration) * 5.0
 
-            scene.score = max(0.0, score - silence_penalty)
+            final_score = max(0.0, score - silence_penalty)
+            scored_scenes.append(replace(scene, score=final_score))
 
-        # Normalize scores to 0-10 range if needed, but here we just cap
-        return sorted(scenes, key=lambda x: x.score, reverse=True)
+        return sorted(scored_scenes, key=lambda x: x.score, reverse=True)
