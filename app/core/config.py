@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
-    BOT_TOKEN: str = "YOUR_TELEGRAM_BOT_TOKEN"
+    BOT_TOKEN: str
     DATABASE_URL: str = "sqlite:///./video_editor.db"
     TEMP_STORAGE_PATH: str = "./uploads"
     WHISPER_MODEL: str = "base"
@@ -20,12 +20,12 @@ class Settings(BaseSettings):
     # SAFE MODE LIMITS
     MAX_VIDEO_SIZE_GB: float = 1.5
     MAX_CLIPS_PER_JOB: int = 3
-    MAX_TOTAL_DURATION: int = 180
+    MAX_TOTAL_DURATION: int = 240
 
     # PERFORMANCE LIMITS
     MAX_CPU_PERCENT: float = 80.0
     MAX_RAM_MB: int = 2000
-    RENDER_TIMEOUT: int = 120
+    RENDER_TIMEOUT: int = 180
     FFMPEG_KILL_TIMEOUT: int = 90
 
     # MODES

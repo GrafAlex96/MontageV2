@@ -43,9 +43,15 @@ class VideoWorker:
         ResourceManager.limit_resources()
 
         # Performance check
-        if ResourceManager.get_cpu_usage() > settings.MAX_CPU_PERCENT:
-             logger.warning(f"CPU usage too high ({ResourceManager.get_cpu_usage()}%), delaying job {job_id}")
+        cpu_usage = ResourceManager.get_cpu_usage()
+        if cpu_usage > settings.MAX_CPU_PERCENT:
+             logger.warning(f"CPU usage too high ({cpu_usage}%), delaying job {job_id}")
              # In production with RQ, we might re-queue. Here we just log.
+
+        mem_usage = ResourceManager.get_memory_usage()
+        if mem_usage > 85.0: # Hard memory guard
+             logger.error(f"Memory usage critical ({mem_usage}%), aborting job {job_id}")
+             return
 
         with get_db() as session:
             job = session.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
@@ -88,6 +94,9 @@ class VideoWorker:
                     gc.collect()
 
                 # 3. Consolidated Master Pipeline
+                # Memory cleanup before Master Editor
+                gc.collect()
+
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
                 session.commit()
 

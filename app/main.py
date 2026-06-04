@@ -12,6 +12,10 @@ setup_logging()
 logger = logging.getLogger("video_editor")
 
 async def start_bot():
+    if not settings.BOT_TOKEN or settings.BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
+        logger.critical("FATAL: BOT_TOKEN is missing or invalid in .env")
+        sys.exit(1)
+
     try:
         bot = Bot(token=settings.BOT_TOKEN)
         dp = Dispatcher()

@@ -98,22 +98,20 @@ class TimelineManager:
         return selected_timeline
 
     def _sync_scene_to_beats(self, scene: Scene, beats: List[float], current_timeline_time: float) -> Scene:
-        """Adjust a single scene's duration to align its end with a beat."""
+        """Adjust a single scene's duration to align its end with a beat with strict limits."""
         duration = scene.end_time - scene.start_time
-        target_absolute_time = current_timeline_time + duration
 
-        # This is tricky because we don't have the global timeline beats,
-        # only local clip beats. We want the CLIP'S relative beat.
-        # local_end_time = scene.end_time
-        closest_beat = min([b for b in beats if b >= scene.start_time], default=scene.end_time)
-
-        # If there's a beat within a reasonable distance of the original end, snap to it
+        # Find beats strictly after the start of this scene
         beats_after_start = [b for b in beats if b > scene.start_time]
-        if beats_after_start:
-            # Pick a beat that makes the duration close to original
-            closest_beat = min(beats_after_start, key=lambda b: abs((b - scene.start_time) - duration))
-            if abs((closest_beat - scene.start_time) - duration) < 1.0:
-                scene.end_time = closest_beat
+        if not beats_after_start:
+            return scene
+
+        # Pick the beat that minimizes deviation from original duration
+        closest_beat = min(beats_after_start, key=lambda b: abs((b - scene.start_time) - duration))
+
+        # Strict adjustment limit: max 0.5s deviation for rhythmic integrity
+        if abs((closest_beat - scene.start_time) - duration) < 0.5:
+            scene.end_time = closest_beat
 
         return scene
 
