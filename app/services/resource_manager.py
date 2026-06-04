@@ -28,15 +28,28 @@ class ResourceManager:
                 continue
 
     @staticmethod
+    def check_stage_budget(stage_name: str, memory_limit_mb: int = 1500):
+        """Hard stage budget enforcement."""
+        import gc
+        gc.collect() # Force cleanup before check
+
+        mem_info = psutil.virtual_memory()
+        used_mb = mem_info.used / (1024 * 1024)
+
+        if used_mb > memory_limit_mb:
+            logger.critical(f"STAGE BUDGET EXCEEDED: {stage_name} using {used_mb}MB (Limit: {memory_limit_mb}MB)")
+            raise RuntimeError(f"Memory budget exceeded in {stage_name}")
+
+    @staticmethod
     def limit_resources():
-        """Set process limits for the current worker."""
+        """Set global process limits for the current worker."""
         cpu = ResourceManager.get_cpu_usage()
         mem = ResourceManager.get_memory_usage()
 
         if cpu > 95:
-            logger.error(f"System CPU critical ({cpu}%). Stopping current task.")
+            logger.error(f"System CPU critical ({cpu}%). Stopping task.")
             raise RuntimeError("CPU limit exceeded")
 
         if mem > 90:
-            logger.error(f"System Memory critical ({mem}%). Stopping current task.")
+            logger.error(f"System Memory critical ({mem}%). Stopping task.")
             raise RuntimeError("Memory limit exceeded")

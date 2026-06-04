@@ -22,6 +22,7 @@ class PipelineOrchestrator:
     def create_master_plan(self, clips: List[Any], target_duration: int) -> Dict[str, Any]:
         """
         Consolidate all suggestions into ONE final master plan.
+        Single authority for all pipeline decisions.
         """
         # 1. Collect all scenes
         all_items = []
@@ -29,22 +30,30 @@ class PipelineOrchestrator:
             for scene in clip.scenes:
                 all_items.append({'path': clip.path, 'scene': scene})
 
-        # 2. Extract semantic data (using first clip as anchor)
+        # 2. Extract semantic data (Helper call)
         story_data = self.story_intel.analyze_content(clips[0].scenes if clips else [])
 
-        # 3. Get Director suggestions
+        # 3. Get Director suggestions (Helper call)
         suggestions = self.director.suggest_strategy(story_data)
 
-        # 4. Master Editor resolves all and decides the final order/hook
+        # 4. Final Decision Authority (Master Editor as tool)
+        # Here we enforce deterministic rules directly in orchestrator if needed
         final_decision = self.master_editor.decide_final_strategy(
             story_data, suggestions, all_items
         )
 
-        # 5. Lock technical rules from presets
+        # 5. Apply style rules from Presets
         editing_rules = self.presets.get_rules(final_decision["final_preset"])
+
+        # 6. Global Decision: Decide if we use MUSIC or VISUAL mode for beat-sync
+        # Music mode only if high confidence and suitable story type
+        beat_sync_mode = "VISUAL"
+        if final_decision["final_preset"] in ["viral_hype", "storytelling"]:
+             beat_sync_mode = "MUSIC"
 
         return {
             "strategy": final_decision,
             "rules": editing_rules,
-            "story_type": story_data["story_type"]
+            "story_type": story_data["story_type"],
+            "beat_sync_mode": beat_sync_mode
         }

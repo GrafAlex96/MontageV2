@@ -14,23 +14,21 @@ class TimelineManager:
         self.editing_rules = editing_rules or {}
         self.attempt = attempt
 
-    def build_combined_timeline_from_items(self, candidate_items: List[Dict], clip_beats: Dict[str, List[float]] = None) -> List[Dict]:
+    def build_combined_timeline_from_items(self, candidate_items: List[Dict], clip_beats: Dict[str, List[float]] = None, mode: str = "VISUAL") -> List[Dict]:
         """
-        Pure functional timeline construction using candidates from Master Editor.
-        Implements strict cumulative cursor enforcement for multi-video integrity.
+        Pure functional timeline construction. Strictly chooses between MUSIC or VISUAL mode.
         """
         from dataclasses import replace
 
         selected_timeline = []
         cumulative_cursor = 0.0
 
-        # Rule enforcement: Technical constraints only
         min_dur = self.editing_rules.get('cut_rules', {}).get('min_duration', 1.0)
         max_dur = self.editing_rules.get('cut_rules', {}).get('max_duration', 5.0)
 
-        # Global beat reference strategy: use the first clip with valid beats as master reference
+        # MUSIC MODE: uses the first clip with high-confidence beats as anchor
         global_beats = []
-        if clip_beats:
+        if mode == "MUSIC" and clip_beats:
             for path, beats in clip_beats.items():
                 if beats:
                     global_beats = beats

@@ -28,21 +28,6 @@ class QualityGate:
             "visual_quality": visual_quality
         }
 
-    def calculate_regression(self, pre_scores: Dict[str, float], post_scores: Dict[str, float]) -> Dict[str, Any]:
-        """Compare pre-render scores with post-render metrics to detect quality degradation."""
-        # Post scores would ideally come from analyzing the RENDERED video file
-        # For now, we simulate a check for significant drops in metrics
-        drops = {}
-        for key in pre_scores:
-            if key in post_scores:
-                diff_pct = (pre_scores[key] - post_scores[key]) / pre_scores[key] if pre_scores[key] > 0 else 0
-                if diff_pct > 0.10: # 10% drop threshold
-                    drops[key] = diff_pct
-
-        return {
-            "is_degraded": len(drops) > 0,
-            "drops": drops
-        }
-
     def is_production_ready(self, scores: Dict[str, float]) -> bool:
+        """Single criteria for quality readiness."""
         return all(score >= 75 for score in scores.values())

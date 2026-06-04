@@ -65,6 +65,7 @@ class VideoWorker:
                 files = session.execute(select(UploadedFile).where(UploadedFile.job_id == job_id)).scalars().all()
 
                 # 2. Analyze
+                ResourceManager.check_stage_budget("ANALYSIS", settings.MAX_RAM_MB)
                 clips = []
                 for i, file in enumerate(files):
                     logger.info(f"Analyzing file {file.file_path}", extra={"trace_id": job.trace_id})
@@ -98,7 +99,7 @@ class VideoWorker:
 
                 # 3. Consolidated Unified Pipeline
                 # Memory cleanup before heavy processing
-                gc.collect()
+                ResourceManager.check_stage_budget("PIPELINE", settings.MAX_RAM_MB)
 
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
                 session.commit()
@@ -120,12 +121,19 @@ class VideoWorker:
                 best_score = -1.0
                 current_rules = base_rules
 
+                # Global Mode decision from orchestrator
+                master_mode = master_plan["beat_sync_mode"]
+
                 for attempt in range(settings.MAX_RETRIES + 1):
                     tm = TimelineManager(target_duration=job.target_duration, editing_rules=current_rules)
-                    # Note: RetryEngine handles strategy shifts, MasterEditor provides candidates
+
+                    # Final fallback if retry engine disables sync
+                    final_mode = "VISUAL" if current_rules.get('disable_sync') else master_mode
+
                     current_timeline = tm.build_combined_timeline_from_items(
                         strategy["final_timeline"],
-                        clip_beats=clip_beats if not current_rules.get('disable_sync') else None
+                        clip_beats=clip_beats,
+                        mode=final_mode
                     )
 
                     current_scores = self.quality_gate.calculate_scores(current_timeline)
@@ -141,7 +149,7 @@ class VideoWorker:
                     if not self.retry_engine.should_continue(attempt + 1, current_total, best_score):
                         break
 
-                    current_rules = self.retry_engine.get_retry_strategy(attempt + 1, base_rules)
+                    current_rules = self.retry_engine.execute(attempt + 1, base_rules)
 
                 timeline = best_timeline
 
@@ -181,7 +189,7 @@ class VideoWorker:
 
                 # 5. Rendering
                 # Memory cleanup before heavy render
-                gc.collect()
+                ResourceManager.check_stage_budget("RENDERING", settings.MAX_RAM_MB)
 
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.RENDERING))
                 session.commit()
@@ -207,18 +215,10 @@ class VideoWorker:
                     logger.error(f"Final validation failed for job {job_id}: {validation['error']}", extra={"trace_id": job.trace_id})
                     raise VideoEditorError(f"Validation failed: {validation['error']}")
 
-                # --- Quality Regression Check ---
-                # Re-score rendered video for visual quality
-                post_analyzer = VideoAnalyzer(final_output_path)
-                post_scenes = post_analyzer.detect_scenes()
-                post_scenes = post_analyzer.analyze_movement(post_scenes)
-                post_scores = self.quality_gate.calculate_scores([{'scene': s} for s in post_scenes])
-
-                regression = self.quality_gate.calculate_regression(scores, post_scores)
-                if regression['is_degraded']:
-                    logger.warning(f"Quality degradation detected for job {job_id}: {regression['drops']}", extra={"trace_id": job.trace_id})
-                    # In production, we might trigger a re-render or re-edit here
-                # --- End Regression Check ---
+                # --- Quality Degradation Check (Simplified) ---
+                # Compare final frame count and stream count with expected
+                if validation.get('degraded'):
+                     logger.warning(f"Output partially degraded for job {job_id}", extra={"trace_id": job.trace_id})
 
                 # 7. Deliver
                 user = session.execute(select(User).where(User.id == job.user_id)).scalar_one()

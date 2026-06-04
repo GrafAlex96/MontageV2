@@ -12,20 +12,22 @@ class RetryEngine:
     def __init__(self):
         self.max_retries = settings.MAX_RETRIES
 
-    def get_retry_strategy(self, attempt: int, base_rules: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, attempt: int, base_rules: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Produce a new strategy based on the retry ladder.
+        Unified interface for executing retry logic.
+        Only authority for triggering and defining retry behavior.
         """
         new_rules = base_rules.copy()
 
         if attempt == 1: # Level 1: Shorten clips (-10%)
             logger.info("Retry Level 1: Shortening clip durations by 10%")
             if 'cut_rules' in new_rules:
+                # Handle nested dict update
+                new_rules['cut_rules'] = new_rules['cut_rules'].copy()
                 new_rules['cut_rules']['max_duration'] *= 0.9
 
         elif attempt == 2: # Level 2: High-score prioritization
             logger.info("Retry Level 2: Prioritizing high-score scenes")
-            # This logic is mostly handled in MasterEditor/TimelineManager
             new_rules['priority_mode'] = 'high_score'
 
         elif attempt >= 3: # Level 3: Fallback (Disable Sync)
