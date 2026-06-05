@@ -43,6 +43,8 @@ async def process_set_duration(callback: types.CallbackQuery, state: FSMContext)
 
     enqueue_job(job_id)
 
+    logger.info("JOB_QUEUED", extra={"job_id": job_id})
+
     await state.clear()
     await callback.message.edit_text(f"Duration set to {duration}s. Your video is now in the queue! 🚀 We'll notify you when it's ready.")
     await callback.answer()

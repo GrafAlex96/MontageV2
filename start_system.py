@@ -5,8 +5,6 @@ import time
 import logging
 import signal
 import shutil
-from app.services.health_check import run_all_checks
-from app.services.recovery import recover_interrupted_jobs, cleanup_stale_artifacts
 from scripts.init_db import init_db
 
 # Configure logging for startup
@@ -15,7 +13,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("startup.log")
+        logging.FileHandler("logs/startup.log")
     ]
 )
 logger = logging.getLogger("startup")
@@ -46,7 +44,6 @@ def install_system_deps():
     missing = []
     for cmd, package in deps.items():
         if shutil.which(cmd) is None:
-            # For ImageMagick, check both 'magick' and 'convert'
             if cmd == "magick" and shutil.which("convert"):
                 continue
             missing.append(package)
@@ -54,10 +51,8 @@ def install_system_deps():
     if missing:
         logger.info(f"📦 Missing system dependencies found: {missing}")
         try:
-            # Check if we have sudo/apt
             if shutil.which("apt-get"):
                 logger.info("Attempting auto-installation via apt-get...")
-                # We use -y and try to avoid sudo if already root
                 cmd_prefix = ["sudo"] if shutil.which("sudo") else []
                 subprocess.run(cmd_prefix + ["apt-get", "update"], check=False)
                 subprocess.run(cmd_prefix + ["apt-get", "install", "-y"] + missing, check=True)
@@ -70,18 +65,15 @@ def install_system_deps():
 def start_redis():
     """Ensure Redis is running, start if necessary."""
     try:
-        # Try pinging existing
         subprocess.run(['redis-cli', 'ping'], capture_output=True, check=True)
         logger.info("✅ Redis is already running.")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         logger.info("📦 Attempting to start Redis server...")
         try:
-            # Try starting local server
             if shutil.which("redis-server"):
                 subprocess.run(['redis-server', '--daemonize', 'yes'], check=True)
                 time.sleep(2)
-                # Verify
                 subprocess.run(['redis-cli', 'ping'], capture_output=True, check=True)
                 logger.info("✅ Redis started successfully.")
                 return True
@@ -101,15 +93,14 @@ def setup_env():
         else:
             logger.error("❌ Critical: .env.example missing.")
             return False
-
-    # Check for BOT_TOKEN
-    from app.core.config import settings
-    if not settings.BOT_TOKEN or settings.BOT_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN":
-        logger.warning("⚠️ WARNING: BOT_TOKEN is missing or invalid in .env. Bot features will not work.")
-
     return True
 
 def main():
+    # 0. Ensure directories
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("uploads", exist_ok=True)
+    os.makedirs("tmp", exist_ok=True)
+
     logger.info("🚀 Starting AI Video Editor System Setup...")
 
     # 1. System Dependencies
@@ -121,18 +112,22 @@ def main():
 
     # 3. Redis Startup
     if not start_redis():
-        logger.error("❌ Redis could not be started. Queuing system will be offline.")
-        # We might continue if bot token is also missing to show FastAPI at least
+        logger.error("❌ Redis is required but could not be started.")
+        # Fallback logic could go here, but for now we exit
+        sys.exit(1)
 
     # 4. Initialize DB
     if not os.path.exists("video_editor.db"):
         logger.info("📦 Initializing SQLite database...")
         init_db()
 
-    # 5. Run Health Checks
-    run_all_checks()
+    # 5. Run Health Checks (Imported after env setup)
+    from app.services.health_check import run_all_checks
+    if not run_all_checks():
+        logger.warning("⚠️ Health checks reported issues. System may be unstable.")
 
     # 6. Startup Recovery
+    from app.services.recovery import recover_interrupted_jobs, cleanup_stale_artifacts
     logger.info("🔄 Running startup recovery and cleanup...")
     recover_interrupted_jobs()
     cleanup_stale_artifacts()
@@ -142,10 +137,22 @@ def main():
     env["PYTHONPATH"] = "."
 
     # Process 1: Worker
+    # Detect RQ availability
+    try:
+        import rq
+        logger.info("✅ RQ found. Starting worker...")
+    except ImportError:
+        logger.error("❌ RQ not found in python path.")
+        sys.exit(1)
+
     logger.info("⚙️ Launching background worker...")
     worker_proc = subprocess.Popen(
         [sys.executable, "app/workers/rq_worker.py"],
-        env=env
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
     )
     processes.append(worker_proc)
 
@@ -153,19 +160,36 @@ def main():
     logger.info("🤖 Launching Bot and API...")
     bot_proc = subprocess.Popen(
         [sys.executable, "-m", "app.main"],
-        env=env
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
     )
     processes.append(bot_proc)
 
     logger.info("✨ ALL SYSTEMS INITIALIZED.")
 
-    # 8. Monitor
+    # 8. Monitor and Log process outputs
+    # Using non-blocking reads or threads would be better for real-time,
+    # but here we'll do a simple loop and periodic poll.
+
     try:
+        import threading
+        def log_stream(proc, name):
+            for line in iter(proc.stdout.readline, ''):
+                logger.info(f"[{name}] {line.strip()}")
+
+        threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
+        threading.Thread(target=log_stream, args=(bot_proc, "BOT/API"), daemon=True).start()
+
         while True:
             for p in processes:
                 if p.poll() is not None:
-                    logger.error(f"❌ Process {p.pid} ({p.args}) exited unexpectedly. Restarting system...")
-                    # For simplicity in this script, we just exit so start.sh can be re-run
+                    logger.error(f"❌ Process {p.pid} exited with code {p.returncode}. Shutting down system...")
+                    for other_p in processes:
+                        if other_p.poll() is None:
+                            other_p.terminate()
                     sys.exit(1)
             time.sleep(5)
     except KeyboardInterrupt:

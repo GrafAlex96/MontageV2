@@ -5,11 +5,11 @@ from pythonjsonlogger import jsonlogger
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
     formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(name)s %(levelname)s %(message)s %(trace_id)s'
+        '%(asctime)s %(name)s %(levelname)s %(message)s %(trace_id)s %(job_id)s %(user_id)s %(file_path)s'
     )
     handler.setFormatter(formatter)
 
-    file_handler = logging.FileHandler("app.json.log")
+    file_handler = logging.FileHandler("logs/app.json.log")
     file_handler.setFormatter(formatter)
 
     root_logger = logging.getLogger()

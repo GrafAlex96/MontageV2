@@ -8,7 +8,9 @@ from sqlalchemy import select
 import os
 from app.core.config import settings
 import uuid
+import logging
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 class UploadStates(StatesGroup):
@@ -70,6 +72,7 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
             session.flush()
             job_id = job.id
             await state.update_data(active_job_id=job_id)
+            logger.info("JOB_CREATED", extra={"job_id": job_id, "user_id": user.id})
 
         # Source of truth for file count is DB
         from sqlalchemy import func
@@ -116,6 +119,16 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
         )
         session.add(uploaded_file)
         session.commit()
+
+        logger.info(
+            "VIDEO_RECEIVED",
+            extra={
+                "job_id": job_id,
+                "user_id": message.from_user.id,
+                "file_path": local_path,
+                "file_size": message.video.file_size
+            }
+        )
 
         await state.update_data(file_count=file_count)
 

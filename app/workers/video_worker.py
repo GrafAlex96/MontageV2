@@ -58,7 +58,14 @@ class VideoWorker:
 
             if not job or job.status in [JobStatus.COMPLETED, JobStatus.FAILED]:
                 return
-            logger.info(f"Processing job {job_id}")
+
+            logger.info(
+                "JOB_STARTED",
+                extra={
+                    "job_id": job_id,
+                    "user_id": job.user_id
+                }
+            )
 
             # Update status to analyzing
             session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.ANALYZING, progress=0.1))
@@ -190,9 +197,12 @@ class VideoWorker:
                 session.commit()
 
                 output_filename = f"final_{job_id}.mp4"
-                output_path = os.path.join(settings.TEMP_STORAGE_PATH, output_filename)
+                output_path = os.path.abspath(os.path.join(settings.TEMP_STORAGE_PATH, output_filename))
 
+                logger.info("FFMPEG_STARTED", extra={"job_id": job_id, "user_id": job.user_id})
                 self.renderer.render_final_video(timeline, all_subtitles, output_path)
+                logger.info("FFMPEG_FINISHED", extra={"job_id": job_id, "user_id": job.user_id, "file_path": output_path})
+                logger.info("RENDER_OUTPUT_PATH", extra={"job_id": job_id, "file_path": output_path})
 
                 await self._update_progress(job_id, 0.8)
                 gc.collect()
@@ -219,8 +229,32 @@ class VideoWorker:
                 # 7. Deliver
                 user = session.execute(select(User).where(User.id == job.user_id)).scalar_one()
 
+                if not os.path.exists(final_output_path):
+                     raise FileNotFoundError(f"Final output video missing: {final_output_path}")
+
+                logger.info("TELEGRAM_SEND_ATTEMPT", extra={"job_id": job_id, "user_id": user.telegram_id, "file_path": final_output_path})
+
                 video_file = types.FSInputFile(final_output_path)
-                await self.bot.send_video(user.telegram_id, video_file, caption="🎬 Your AI edited video is ready! Done.")
+
+                # Delivery pipeline with retry
+                sent = False
+                for attempt in range(3):
+                    try:
+                        await self.bot.send_video(
+                            user.telegram_id,
+                            video_file,
+                            caption="🎬 Your AI edited video is ready! Done."
+                        )
+                        sent = True
+                        logger.info("TELEGRAM_SEND_SUCCESS", extra={"job_id": job_id, "user_id": user.telegram_id})
+                        break
+                    except Exception as e:
+                        logger.warning(f"Telegram send attempt {attempt+1} failed: {e}")
+                        await asyncio.sleep(2)
+
+                if not sent:
+                    logger.error("TELEGRAM_SEND_FAILED", extra={"job_id": job_id, "user_id": user.telegram_id})
+                    raise RuntimeError("Failed to deliver video after 3 attempts")
 
                 # 8. Record History and Update Status
                 render = RenderHistory(
