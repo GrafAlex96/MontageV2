@@ -15,6 +15,18 @@ def check_ffmpeg():
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
+def check_imagemagick():
+    try:
+        # MoviePy 2.x often needs 'magick' or 'convert'
+        subprocess.run(['magick', '-version'], capture_output=True, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        try:
+            subprocess.run(['convert', '-version'], capture_output=True, check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+
 def check_ffprobe():
     try:
         subprocess.run(['ffprobe', '-version'], capture_output=True, check=True)
@@ -43,6 +55,7 @@ def run_all_checks():
     checks = {
         "FFmpeg": check_ffmpeg(),
         "FFprobe": check_ffprobe(),
+        "ImageMagick": check_imagemagick(),
         "Redis": check_redis(),
         "Database": check_db(),
         "Env (Bot Token)": bool(settings.BOT_TOKEN and settings.BOT_TOKEN != "YOUR_TELEGRAM_BOT_TOKEN"),

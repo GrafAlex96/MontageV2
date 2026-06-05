@@ -1,22 +1,15 @@
 # CHANGE LOG
 
-## [v3.4.1] - 2026-06-04
+## [v3.4.1] - 2026-06-05
 ### Fixed
-- UnboundLocalError in upload handler; user object is now strictly fetched first.
-- FSM file_count sync with DB source of truth.
-- storage_bytes persistence with explicit session commit.
-- Missing sys import and logger definitions across services.
-- Unawaited coroutine warnings in VideoWorker.
+- End-to-end pipeline: Worker now correctly delivers processed videos to users.
+- FrozenInstanceError: Resolved immutable dataclass mutation in Timeline Service using replace().
+- Startup architecture: Single entrypoint (start_system.py) coordinates all services.
+- Concurrent job protection: Refined logic to allow uploads while blocking concurrent renders.
+- Bot reliability: Fixed unawaited coroutines and missing library imports.
+- State integrity: DB is now the absolute source of truth for job status and file counts.
 
 ### Added
-- Automated One-Command Startup (bash start.sh) for Codespaces.
-- Auto-Redis management in startup script.
-- Background worker integration (RQ) in startup.
-- Multi-video processing pipeline with automated bot delivery.
-- Comprehensive Health Check and Job Recovery systems.
-- Concurrent job protection for users.
-
-### Security
-- Reinforced path traversal protection using UUIDs and absolute path validation.
-- File format and size validation.
-- User storage quota enforcement.
+- Unified Startup: 'bash start.sh' now handles Redis lifecycle, DB init, health checks, and worker startup.
+- Multi-process Manager: Python-based process monitor to ensure all system components stay alive.
+- Dependency Health Check: Added ImageMagick verification to system startup.

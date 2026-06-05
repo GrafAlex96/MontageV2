@@ -84,6 +84,7 @@ class TimelineManager:
 
     def _sync_scene_to_beats(self, scene: Scene, beats: List[float], current_timeline_time: float) -> Scene:
         """Adjust a single scene's duration to align its end with a beat with strict limits."""
+        from dataclasses import replace
         duration = scene.end_time - scene.start_time
 
         # Find beats strictly after the start of this scene
@@ -96,12 +97,14 @@ class TimelineManager:
 
         # Strict adjustment limit: max 0.5s deviation for rhythmic integrity
         if abs((closest_beat - scene.start_time) - duration) < 0.5:
-            scene.end_time = closest_beat
+            # Use replace for frozen dataclass
+            return replace(scene, end_time=closest_beat)
 
         return scene
 
     def _sync_to_beats(self, timeline: List[Dict], beats: List[float]) -> List[Dict]:
         """Adjust clip durations to align with beats."""
+        from dataclasses import replace
         current_time = 0.0
         synced_timeline = []
 
@@ -116,11 +119,11 @@ class TimelineManager:
 
             # If the beat is close enough, adjust duration
             if abs(closest_beat - target_time) < 1.0:
-                scene.end_time = scene.start_time + (closest_beat - current_time)
+                new_scene = replace(scene, end_time=scene.start_time + (closest_beat - current_time))
                 current_time = closest_beat
+                synced_timeline.append({'path': item['path'], 'scene': new_scene})
             else:
                 current_time += duration
-
-            synced_timeline.append(item)
+                synced_timeline.append(item)
 
         return synced_timeline

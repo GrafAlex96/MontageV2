@@ -257,8 +257,13 @@ def process_job_task(job_id: int):
     from aiogram import Bot
     from app.core.config import settings
 
-    bot = Bot(token=settings.BOT_TOKEN)
-    worker = VideoWorker(bot)
+    async def _run():
+        bot = Bot(token=settings.BOT_TOKEN)
+        try:
+            worker = VideoWorker(bot)
+            await worker.process_job(job_id)
+        finally:
+            # Explicitly close session and connector to prevent unclosed connection warnings
+            await bot.session.close()
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(worker.process_job(job_id))
+    asyncio.run(_run())

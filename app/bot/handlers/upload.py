@@ -45,17 +45,24 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
             session.add(user)
             session.flush()
 
-        # Concurrent upload protection / Limit active jobs
-        active_job = session.execute(
-            select(Job).where(Job.user_id == user.id, Job.status.in_([JobStatus.QUEUED, JobStatus.ANALYZING, JobStatus.PROCESSING, JobStatus.RENDERING]))
-        ).scalar_one_or_none()
-
-        if active_job:
-            return await message.answer("You already have a job in progress. Please wait for it to finish! ⏳")
-
         # Get or create active job
         data = await state.get_data()
         job_id = data.get('active_job_id')
+
+        # Concurrent job protection: Only allow one job to be in the "QUEUED" to "POST_PROCESSING" phase.
+        # However, we must allow the CURRENT PENDING job to continue accepting uploads.
+        if job_id:
+             # Check if this user has ANOTHER job that is already processing
+             other_active_job = session.execute(
+                select(Job).where(
+                    Job.user_id == user.id,
+                    Job.id != job_id,
+                    Job.status.in_([JobStatus.QUEUED, JobStatus.ANALYZING, JobStatus.PROCESSING, JobStatus.RENDERING, JobStatus.POST_PROCESSING])
+                )
+             ).scalar_one_or_none()
+
+             if other_active_job:
+                 return await message.answer("You already have a job in progress. Please wait for it to finish! ⏳")
 
         if not job_id:
             job = Job(user_id=user.id, status=JobStatus.PENDING)
