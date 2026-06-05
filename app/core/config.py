@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
-    BOT_TOKEN: str
+    BOT_TOKEN: str = "YOUR_TELEGRAM_BOT_TOKEN"
     DATABASE_URL: str = "sqlite:///./video_editor.db"
     TEMP_STORAGE_PATH: str = "./uploads"
     WHISPER_MODEL: str = "base"
