@@ -95,8 +95,27 @@ def setup_env():
             return False
     return True
 
+def start_worker(env):
+    """Start and monitor RQ worker."""
+    logger.info("⚙️ Launching background worker...")
+    try:
+        import rq
+    except ImportError:
+        logger.error("❌ RQ not found in python path.")
+        return None
+
+    worker_proc = subprocess.Popen(
+        [sys.executable, "app/workers/rq_worker.py"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    logger.info(f"Worker started with PID {worker_proc.pid}")
+    return worker_proc
+
 def main():
-    # 0. Ensure directories
     os.makedirs("logs", exist_ok=True)
     os.makedirs("uploads", exist_ok=True)
     os.makedirs("tmp", exist_ok=True)
@@ -113,7 +132,6 @@ def main():
     # 3. Redis Startup
     if not start_redis():
         logger.error("❌ Redis is required but could not be started.")
-        # Fallback logic could go here, but for now we exit
         sys.exit(1)
 
     # 4. Initialize DB
@@ -121,10 +139,11 @@ def main():
         logger.info("📦 Initializing SQLite database...")
         init_db()
 
-    # 5. Run Health Checks (Imported after env setup)
+    # 5. Run Health Checks
     from app.services.health_check import run_all_checks
     if not run_all_checks():
-        logger.warning("⚠️ Health checks reported issues. System may be unstable.")
+        logger.error("❌ Health checks failed. System is not production-ready.")
+        sys.exit(1)
 
     # 6. Startup Recovery
     from app.services.recovery import recover_interrupted_jobs, cleanup_stale_artifacts
@@ -136,27 +155,11 @@ def main():
     env = os.environ.copy()
     env["PYTHONPATH"] = "."
 
-    # Process 1: Worker
-    # Detect RQ availability
-    try:
-        import rq
-        logger.info("✅ RQ found. Starting worker...")
-    except ImportError:
-        logger.error("❌ RQ not found in python path.")
+    worker_proc = start_worker(env)
+    if not worker_proc:
         sys.exit(1)
-
-    logger.info("⚙️ Launching background worker...")
-    worker_proc = subprocess.Popen(
-        [sys.executable, "app/workers/rq_worker.py"],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
     processes.append(worker_proc)
 
-    # Process 2: Bot/API
     logger.info("🤖 Launching Bot and API...")
     bot_proc = subprocess.Popen(
         [sys.executable, "-m", "app.main"],
@@ -170,30 +173,43 @@ def main():
 
     logger.info("✨ ALL SYSTEMS INITIALIZED.")
 
-    # 8. Monitor and Log process outputs
-    # Using non-blocking reads or threads would be better for real-time,
-    # but here we'll do a simple loop and periodic poll.
+    # 8. Monitor and Log
+    import threading
+    def log_stream(proc, name):
+        for line in iter(proc.stdout.readline, ''):
+            logger.info(f"[{name}] {line.strip()}")
 
-    try:
-        import threading
-        def log_stream(proc, name):
-            for line in iter(proc.stdout.readline, ''):
-                logger.info(f"[{name}] {line.strip()}")
+    threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
+    threading.Thread(target=log_stream, args=(bot_proc, "BOT/API"), daemon=True).start()
 
-        threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
-        threading.Thread(target=log_stream, args=(bot_proc, "BOT/API"), daemon=True).start()
+    worker_restarts = 0
+    while True:
+        # Check Worker
+        if worker_proc.poll() is not None:
+            logger.error(f"❌ Worker process {worker_proc.pid} exited with code {worker_proc.returncode}")
+            if worker_restarts < 3:
+                worker_restarts += 1
+                logger.info(f"🔄 Restarting worker (Attempt {worker_restarts}/3)...")
+                processes.remove(worker_proc)
+                worker_proc = start_worker(env)
+                processes.append(worker_proc)
+                threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
+            else:
+                logger.critical("❌ Worker failed permanently after 3 restarts.")
+                break
 
-        while True:
-            for p in processes:
-                if p.poll() is not None:
-                    logger.error(f"❌ Process {p.pid} exited with code {p.returncode}. Shutting down system...")
-                    for other_p in processes:
-                        if other_p.poll() is None:
-                            other_p.terminate()
-                    sys.exit(1)
-            time.sleep(5)
-    except KeyboardInterrupt:
-        logger.info("Stopping system...")
+        # Check Bot
+        if bot_proc.poll() is not None:
+            logger.error(f"❌ Bot process {bot_proc.pid} exited with code {bot_proc.returncode}")
+            break
+
+        time.sleep(5)
+
+    # Cleanup on exit
+    for p in processes:
+        if p.poll() is None:
+            p.terminate()
+    sys.exit(1)
 
 if __name__ == "__main__":
     main()

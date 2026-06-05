@@ -67,12 +67,22 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
                  return await message.answer("You already have a job in progress. Please wait for it to finish! ⏳")
 
         if not job_id:
-            job = Job(user_id=user.id, status=JobStatus.PENDING)
+            trace_id = str(uuid.uuid4())
+            job = Job(user_id=user.id, status=JobStatus.PENDING, trace_id=trace_id)
             session.add(job)
             session.flush()
             job_id = job.id
             await state.update_data(active_job_id=job_id)
-            logger.info("JOB_CREATED", extra={"job_id": job_id, "user_id": user.id})
+            logger.info(
+                "TRACE_JOB_CREATED",
+                extra={
+                    "job_id": job_id,
+                    "user_id": user.id,
+                    "trace_id": trace_id,
+                    "stage": "creation",
+                    "status": "success"
+                }
+            )
 
         # Source of truth for file count is DB
         from sqlalchemy import func
@@ -120,13 +130,18 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
         session.add(uploaded_file)
         session.commit()
 
+        job = session.get(Job, job_id)
         logger.info(
-            "VIDEO_RECEIVED",
+            "TRACE_UPLOAD_RECEIVED",
             extra={
                 "job_id": job_id,
                 "user_id": message.from_user.id,
                 "file_path": local_path,
-                "file_size": message.video.file_size
+                "file_size": message.video.file_size,
+                "file_count": file_count,
+                "trace_id": job.trace_id,
+                "stage": "upload",
+                "status": "success"
             }
         )
 

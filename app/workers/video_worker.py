@@ -60,10 +60,13 @@ class VideoWorker:
                 return
 
             logger.info(
-                "JOB_STARTED",
+                "TRACE_JOB_STARTED",
                 extra={
                     "job_id": job_id,
-                    "user_id": job.user_id
+                    "user_id": job.user_id,
+                    "trace_id": job.trace_id,
+                    "stage": "worker_start",
+                    "status": "success"
                 }
             )
 
@@ -199,10 +202,28 @@ class VideoWorker:
                 output_filename = f"final_{job_id}.mp4"
                 output_path = os.path.abspath(os.path.join(settings.TEMP_STORAGE_PATH, output_filename))
 
-                logger.info("FFMPEG_STARTED", extra={"job_id": job_id, "user_id": job.user_id})
+                logger.info(
+                    "TRACE_FFMPEG_STARTED",
+                    extra={
+                        "job_id": job_id,
+                        "user_id": job.user_id,
+                        "trace_id": job.trace_id,
+                        "stage": "rendering",
+                        "status": "start"
+                    }
+                )
                 self.renderer.render_final_video(timeline, all_subtitles, output_path)
-                logger.info("FFMPEG_FINISHED", extra={"job_id": job_id, "user_id": job.user_id, "file_path": output_path})
-                logger.info("RENDER_OUTPUT_PATH", extra={"job_id": job_id, "file_path": output_path})
+                logger.info(
+                    "TRACE_FFMPEG_FINISHED",
+                    extra={
+                        "job_id": job_id,
+                        "user_id": job.user_id,
+                        "trace_id": job.trace_id,
+                        "file_path": output_path,
+                        "stage": "rendering",
+                        "status": "success"
+                    }
+                )
 
                 await self._update_progress(job_id, 0.8)
                 gc.collect()
@@ -232,7 +253,18 @@ class VideoWorker:
                 if not os.path.exists(final_output_path):
                      raise FileNotFoundError(f"Final output video missing: {final_output_path}")
 
-                logger.info("TELEGRAM_SEND_ATTEMPT", extra={"job_id": job_id, "user_id": user.telegram_id, "file_path": final_output_path})
+                logger.info(
+                    "TRACE_TELEGRAM_SEND_ATTEMPT",
+                    extra={
+                        "job_id": job_id,
+                        "user_id": user.telegram_id,
+                        "trace_id": job.trace_id,
+                        "file_path": final_output_path,
+                        "file_size": os.path.getsize(final_output_path),
+                        "stage": "delivery",
+                        "status": "attempt"
+                    }
+                )
 
                 video_file = types.FSInputFile(final_output_path)
 
@@ -240,20 +272,39 @@ class VideoWorker:
                 sent = False
                 for attempt in range(3):
                     try:
-                        await self.bot.send_video(
+                        response = await self.bot.send_video(
                             user.telegram_id,
                             video_file,
                             caption="🎬 Your AI edited video is ready! Done."
                         )
                         sent = True
-                        logger.info("TELEGRAM_SEND_SUCCESS", extra={"job_id": job_id, "user_id": user.telegram_id})
+                        logger.info(
+                            "TRACE_TELEGRAM_SEND_RESULT",
+                            extra={
+                                "job_id": job_id,
+                                "user_id": user.telegram_id,
+                                "trace_id": job.trace_id,
+                                "status": "success",
+                                "response": str(response),
+                                "stage": "delivery"
+                            }
+                        )
                         break
                     except Exception as e:
-                        logger.warning(f"Telegram send attempt {attempt+1} failed: {e}")
+                        logger.warning(f"Telegram send attempt {attempt+1} failed: {e}", extra={"trace_id": job.trace_id})
                         await asyncio.sleep(2)
 
                 if not sent:
-                    logger.error("TELEGRAM_SEND_FAILED", extra={"job_id": job_id, "user_id": user.telegram_id})
+                    logger.error(
+                        "TRACE_TELEGRAM_SEND_RESULT",
+                        extra={
+                            "job_id": job_id,
+                            "user_id": user.telegram_id,
+                            "trace_id": job.trace_id,
+                            "status": "fail",
+                            "stage": "delivery"
+                        }
+                    )
                     raise RuntimeError("Failed to deliver video after 3 attempts")
 
                 # 8. Record History and Update Status
@@ -267,10 +318,28 @@ class VideoWorker:
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.COMPLETED, progress=1.0))
                 session.commit()
 
-                logger.info(f"Job {job_id} completed successfully")
+                logger.info(
+                    "TRACE_JOB_COMPLETED",
+                    extra={
+                        "job_id": job_id,
+                        "trace_id": job.trace_id,
+                        "stage": "final",
+                        "status": "success"
+                    }
+                )
 
             except Exception as e:
-                logger.error(f"Error processing job {job_id}: {e}", exc_info=True)
+                logger.error(
+                    "TRACE_JOB_FAILED",
+                    extra={
+                        "job_id": job_id,
+                        "trace_id": job.trace_id,
+                        "error": str(e),
+                        "stage": "final",
+                        "status": "fail"
+                    },
+                    exc_info=True
+                )
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.FAILED, error_message=str(e)))
                 session.commit()
 
