@@ -37,27 +37,40 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
     if message.video.file_size > max_size_bytes:
         return await message.answer(f"File is too large. Maximum size is {settings.MAX_VIDEO_SIZE_GB}GB.")
 
-    # Get or create active job in FSM
-    data = await state.get_data()
-    job_id = data.get('active_job_id')
-
     with get_db() as session:
+        # ALWAYS fetch user first to avoid UnboundLocalError and ensure we have fresh data
+        user = session.execute(select(User).where(User.telegram_id == message.from_user.id)).scalar_one_or_none()
+        if not user:
+            user = User(telegram_id=message.from_user.id, username=message.from_user.username)
+            session.add(user)
+            session.flush()
+
+        # Concurrent upload protection / Limit active jobs
+        active_job = session.execute(
+            select(Job).where(Job.user_id == user.id, Job.status.in_([JobStatus.QUEUED, JobStatus.ANALYZING, JobStatus.PROCESSING, JobStatus.RENDERING]))
+        ).scalar_one_or_none()
+
+        if active_job:
+            return await message.answer("You already have a job in progress. Please wait for it to finish! ⏳")
+
+        # Get or create active job
+        data = await state.get_data()
+        job_id = data.get('active_job_id')
+
         if not job_id:
-            # Create new job
-            user = session.execute(select(User).where(User.telegram_id == message.from_user.id)).scalar_one_or_none()
-
-            if not user:
-                user = User(telegram_id=message.from_user.id, username=message.from_user.username)
-                session.add(user)
-                session.flush()
-
             job = Job(user_id=user.id, status=JobStatus.PENDING)
             session.add(job)
             session.flush()
             job_id = job.id
-            await state.update_data(active_job_id=job_id, file_count=0)
+            await state.update_data(active_job_id=job_id)
 
-        file_count = data.get('file_count', 0) + 1
+        # Source of truth for file count is DB
+        from sqlalchemy import func
+        file_count = session.execute(
+            select(func.count(UploadedFile.id)).where(UploadedFile.job_id == job_id)
+        ).scalar() or 0
+        file_count += 1
+
         if file_count > settings.MAX_CLIPS_PER_JOB:
             return await message.answer(f"Maximum {settings.MAX_CLIPS_PER_JOB} videos allowed in SAFE MODE.")
 
@@ -77,12 +90,12 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
             raise ValueError("Potential path traversal attack detected")
 
         # 3. User Quota Check
-        user = session.execute(select(User).where(User.id == user.id)).scalar_one()
         if user.used_storage_bytes + message.video.file_size > user.storage_quota_bytes:
              return await message.answer("Storage quota exceeded. Please delete some videos first.")
 
         # Update used storage
         user.used_storage_bytes += message.video.file_size
+        session.add(user) # Explicitly mark for update
 
         await bot.download_file(file.file_path, local_path)
 

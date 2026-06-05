@@ -1,7 +1,10 @@
+import logging
 from moviepy import VideoFileClip, concatenate_videoclips, TextClip, CompositeVideoClip, ColorClip
 from typing import List, Dict
 import os
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 class Renderer:
     def __init__(self):

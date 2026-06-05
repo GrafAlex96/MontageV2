@@ -18,6 +18,8 @@ from app.services.resource_manager import ResourceManager
 from app.services.validator import FinalValidator
 from app.core.orchestrator import PipelineOrchestrator
 from app.core.retry_engine import RetryEngine
+from app.agents.story_intelligence import StoryIntelligence
+from app.agents.director_agent import DirectorAgent
 from app.core.config import settings
 from app.core.exceptions import VideoEditorError, ErrorCategory
 
@@ -33,6 +35,8 @@ class VideoWorker:
         self.quality_gate = QualityGate()
         self.orchestrator = PipelineOrchestrator()
         self.retry_engine = RetryEngine()
+        self.story_intel = StoryIntelligence()
+        self.director = DirectorAgent()
 
     async def process_job(self, job_id: int):
         ResourceManager.cleanup_zombie_processes()
@@ -86,7 +90,7 @@ class VideoWorker:
                     clips.append(VideoClip(path=file.file_path, scenes=scored_scenes))
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
-                    self._update_progress(job_id, progress)
+                    await self._update_progress(job_id, progress)
 
                 # 3. Consolidated Unified Pipeline
                 # Memory cleanup before heavy processing
@@ -190,7 +194,7 @@ class VideoWorker:
 
                 self.renderer.render_final_video(timeline, all_subtitles, output_path)
 
-                self._update_progress(job_id, 0.8)
+                await self._update_progress(job_id, 0.8)
                 gc.collect()
 
                 # 6. Audio Optimization
@@ -216,7 +220,7 @@ class VideoWorker:
                 user = session.execute(select(User).where(User.id == job.user_id)).scalar_one()
 
                 video_file = types.FSInputFile(final_output_path)
-                await self.bot.send_video(user.telegram_id, video_file, caption="Here is your edited video! 🎬")
+                await self.bot.send_video(user.telegram_id, video_file, caption="🎬 Your AI edited video is ready! Done.")
 
                 # 8. Record History and Update Status
                 render = RenderHistory(
@@ -240,15 +244,12 @@ class VideoWorker:
                 user = session.execute(select(User).where(User.id == job.user_id)).scalar_one()
                 await self.bot.send_message(user.telegram_id, f"Sorry, there was an error processing your video: {e}")
 
-    def _update_progress(self, job_id: int, progress: float):
+    async def _update_progress(self, job_id: int, progress: float):
         with get_db() as session:
             session.execute(update(Job).where(Job.id == job_id).values(progress=progress))
             session.commit()
 
-        # This is an async call from a sync context or we need to wrap it?
-        # VideoWorker is already async, so this is fine.
-        import asyncio
-        asyncio.create_task(self.notifier.send_progress_update(job_id, progress))
+        await self.notifier.send_progress_update(job_id, progress)
 
 # Task for RQ
 def process_job_task(job_id: int):

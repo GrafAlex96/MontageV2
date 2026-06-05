@@ -40,21 +40,27 @@ class AudioService:
             # 3. Simple Confidence Heuristic
             # If tempo is stable and in musical range
             confidence = 0.0
-            if 60 <= tempo <= 180:
+
+            # librosa.beat.beat_track returns a single float or an array depending on version/input
+            tempo_val = float(tempo) if np.isscalar(tempo) else float(tempo[0])
+
+            if 60 <= tempo_val <= 180:
                 confidence = 0.8
-            elif 40 <= tempo <= 220:
+            elif 40 <= tempo_val <= 220:
                 confidence = 0.5
 
             # Deduct if audio is very noisy or has low rhythmic peaks
             onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-            pulse = librosa.beat.plp(onset_envelope=onset_env, sr=sr)
-            if np.mean(pulse) < 0.1:
-                confidence *= 0.5
+            # Ensure onset_env is not empty
+            if len(onset_env) > 0:
+                pulse = librosa.beat.plp(onset_envelope=onset_env, sr=sr)
+                if np.mean(pulse) < 0.1:
+                    confidence *= 0.5
 
             return {
                 "beats": [float(t) for t in beat_times],
                 "confidence": confidence,
-                "tempo": float(tempo)
+                "tempo": tempo_val
             }
         except Exception as e:
             logger.warning(f"Beat detection failed: {e}")

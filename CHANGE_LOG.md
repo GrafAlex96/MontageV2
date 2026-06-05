@@ -1,8 +1,22 @@
-# AI Video Editor Bot - Project Change Log
+# CHANGE LOG
 
-| Version | Date | Type | Description |
-|---|---|---|---|
-| 1.0.0 | 2026-06-03 | Feature | Initial Bot Implementation |
-| 2.0.0 | 2026-06-03 | Architectural Fix | Sync Architecture Unification |
-| 3.0.0 | 2026-06-03 | Architectural Fix | Pipeline Orchestration Consolidation |
-| 3.4.0 | 2026-06-03 | Optimization | Final Codespaces Stabilization & Unification |
+## [v3.4.1] - 2026-06-04
+### Fixed
+- UnboundLocalError in upload handler; user object is now strictly fetched first.
+- FSM file_count sync with DB source of truth.
+- storage_bytes persistence with explicit session commit.
+- Missing sys import and logger definitions across services.
+- Unawaited coroutine warnings in VideoWorker.
+
+### Added
+- Automated One-Command Startup (bash start.sh) for Codespaces.
+- Auto-Redis management in startup script.
+- Background worker integration (RQ) in startup.
+- Multi-video processing pipeline with automated bot delivery.
+- Comprehensive Health Check and Job Recovery systems.
+- Concurrent job protection for users.
+
+### Security
+- Reinforced path traversal protection using UUIDs and absolute path validation.
+- File format and size validation.
+- User storage quota enforcement.

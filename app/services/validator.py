@@ -16,7 +16,13 @@ class FinalValidator:
             '-show_streams', '-show_format', filepath
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
-        data = json.loads(result.stdout)
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"valid": False, "error": "Invalid media file (could not parse metadata)"}
+
+        if 'streams' not in data:
+            return {"valid": False, "error": "Invalid media file (no streams found)"}
 
         video_stream = next((s for s in data['streams'] if s['codec_type'] == 'video'), None)
         if not video_stream:

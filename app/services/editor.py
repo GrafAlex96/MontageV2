@@ -1,69 +1,66 @@
-from typing import List
-from app.services.analysis import Scene
+import asyncio
+import subprocess
+import os
+import logging
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+async def process_video_ffmpeg(input_path: str, output_path: str, duration: int = 15) -> bool:
+    """
+    Run basic FFmpeg editing in a separate thread.
+    Scales to 1080x1920 (9:16) and trims to duration.
+    """
+    # Placeholder for actual complex logic
+    # Basic command: Scale, pad, and trim
+    cmd = [
+        'ffmpeg', '-y', '-i', input_path,
+        '-vf', f'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1',
+        '-t', str(duration),
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac',
+        output_path
+    ]
+
+    try:
+        # Run in executor to avoid blocking the event loop
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode == 0:
+            return True
+        else:
+            logger.error(f"FFmpeg error: {stderr.decode()}")
+            return False
+    except Exception as e:
+        logger.error(f"Failed to run FFmpeg: {e}")
+        return False
 
 class Editor:
-    def __init__(self, target_duration: int):
+    def __init__(self, target_duration: int = 15):
         self.target_duration = target_duration
 
-    def select_best_segments(self, scenes: List[Scene]) -> List[Scene]:
-        """Select the best segments and structure them as Setup -> Hook -> Development -> Peak -> Ending."""
-        if not scenes: return []
-
-        hooks = [s for s in scenes if s.is_hook]
-        peaks = [s for s in scenes if s.is_peak and not s.is_hook]
-        others = [s for s in scenes if not s.is_hook and not s.is_peak]
-
-        # Sort by score
-        hooks.sort(key=lambda x: x.score, reverse=True)
-        peaks.sort(key=lambda x: x.score, reverse=True)
-        others.sort(key=lambda x: x.score, reverse=True)
-
-        selected_hook = hooks[0] if hooks else (peaks[0] if peaks else others[0])
-
-        # Plan the structure
-        # Target duration breakdown (rough):
-        # Hook: 15%
-        # Setup: 15%
-        # Development: 40%
-        # Peak: 20%
-        # Ending: 10%
-
-        structure = []
-        current_duration = 0.0
-
-        # 1. Hook (Must be strong, will be moved to front later)
-        structure.append(selected_hook)
-        current_duration += (selected_hook.end_time - selected_hook.start_time)
-
-        # 2. Fill the rest with best remaining scenes
-        remaining_scenes = [s for s in scenes if s != selected_hook]
-        remaining_scenes.sort(key=lambda x: x.score, reverse=True)
+    def select_best_segments(self, scenes: list) -> list:
+        """Select top scenes that fit within target duration."""
+        sorted_scenes = sorted(scenes, key=lambda x: x.score, reverse=True)
+        selected = []
+        current_duration = 0
 
         from dataclasses import replace
-        for scene in remaining_scenes:
-            if current_duration >= self.target_duration:
-                break
-
-            duration = scene.end_time - scene.start_time
-            if current_duration + duration <= self.target_duration:
-                structure.append(scene)
-                current_duration += duration
-            else:
+        for scene in sorted_scenes:
+            scene_duration = scene.end_time - scene.start_time
+            if current_duration + scene_duration <= self.target_duration:
+                selected.append(scene)
+                current_duration += scene_duration
+            elif current_duration < self.target_duration:
+                # Add partial segment if there's space
                 remaining = self.target_duration - current_duration
-                if remaining > 1.0:
-                    scene_copy = replace(scene, end_time=scene.start_time + remaining)
-                    structure.append(scene_copy)
+                if remaining > 0.1:
+                    trimmed_scene = replace(scene, end_time=scene.start_time + remaining)
+                    selected.append(trimmed_scene)
                     current_duration += remaining
-
-        # 3. Order the structure: Setup -> Hook -> Development -> Peak -> Ending
-        # For simplicity in this logic, we'll ensure Hook is at the start as per social media rules.
-        # But we also want narrative flow.
-        # Let's find the most "ending-like" (usually late in video) and "setup-like" (early).
-
-        hook = selected_hook
-        others = [s for s in structure if s != hook]
-        others.sort(key=lambda x: x.start_time) # Chronological for narrative
-
-        # Hook first, then the rest
-        final_selected = [hook] + others
-        return final_selected
+                    break
+        return selected

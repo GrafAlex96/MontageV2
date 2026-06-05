@@ -67,14 +67,18 @@ class VideoAnalyzer:
 
     def analyze_movement(self, scenes: List[Scene]) -> List[Scene]:
         """Analyze movement in each scene using frame differencing (Memory efficient)."""
+        from dataclasses import replace
         cap = cv2.VideoCapture(self.video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps == 0: fps = 30.0
 
+        updated_scenes = []
         for scene in scenes:
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(scene.start_time * fps))
             ret, prev_frame = cap.read()
-            if not ret: continue
+            if not ret:
+                updated_scenes.append(scene)
+                continue
 
             prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
             movements = []
@@ -98,10 +102,11 @@ class VideoAnalyzer:
                     del frame
                     del curr_gray
 
-            scene.movement_score = float(np.mean(movements)) if movements else 0.0
+            score = float(np.mean(movements)) if movements else 0.0
+            updated_scenes.append(replace(scene, movement_score=score))
 
         cap.release()
-        return scenes
+        return updated_scenes
 
     def detect_silence(self) -> List[Dict[str, float]]:
         """Use FFmpeg to detect silent segments."""
@@ -130,17 +135,23 @@ class VideoAnalyzer:
     def analyze_audio_energy(self, scenes: List[Scene]) -> List[Scene]:
         """Analyze audio energy for each scene."""
         import librosa
+        from dataclasses import replace
+        updated_scenes = []
         try:
             y, sr = librosa.load(self.video_path, sr=None)
             for scene in scenes:
                 start_idx = int(scene.start_time * sr)
                 end_idx = int(scene.end_time * sr)
+                energy = 0.0
                 if start_idx < len(y):
                     segment = y[start_idx:min(end_idx, len(y))]
-                    scene.audio_energy = float(np.mean(librosa.feature.rms(y=segment)))
+                    if len(segment) > 0:
+                        energy = float(np.mean(librosa.feature.rms(y=segment)))
+                updated_scenes.append(replace(scene, audio_energy=energy))
         except Exception as e:
             print(f"Audio analysis failed: {e}")
-        return scenes
+            return scenes
+        return updated_scenes
 
     def detect_hooks_and_peaks(self, scenes: List[Scene]) -> List[Scene]:
         """Identify scenes that can serve as hooks or emotional peaks."""

@@ -1,6 +1,9 @@
+import logging
 from typing import List, Dict
 from dataclasses import dataclass
 from app.services.analysis import Scene, VideoAnalyzer
+
+logger = logging.getLogger(__name__)
 from app.services.editor import Editor
 
 @dataclass

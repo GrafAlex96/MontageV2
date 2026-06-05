@@ -1,11 +1,14 @@
 import asyncio
 import logging
+import sys
 from aiogram import Bot, Dispatcher
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.bot.handlers import upload, settings as settings_handlers
 from app.workers.video_worker import VideoWorker
 from app.api.main import app as fastapi_app
+from app.services.health_check import run_all_checks
+from app.services.recovery import recover_interrupted_jobs, cleanup_stale_artifacts
 import uvicorn
 
 setup_logging()
@@ -40,6 +43,13 @@ def run_api():
     uvicorn.run(fastapi_app, host="0.0.0.0", port=8000)
 
 async def main():
+    # Health Check & Recovery on Startup
+    if not run_all_checks():
+        sys.exit(1)
+
+    recover_interrupted_jobs()
+    cleanup_stale_artifacts()
+
     # Since aiogram 3.x and FastAPI both have their event loops,
     # we can run them together.
     # For production, we might want separate processes, but for this modular app,
