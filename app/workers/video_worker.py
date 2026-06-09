@@ -39,6 +39,9 @@ class VideoWorker:
         self.director = DirectorAgent()
 
     async def process_job(self, job_id: int):
+        import time
+        start_time = time.time()
+
         ResourceManager.cleanup_zombie_processes()
         ResourceManager.limit_resources()
 
@@ -60,13 +63,13 @@ class VideoWorker:
                 return
 
             logger.info(
-                "TRACE_JOB_STARTED",
+                "TRACE_WORKER_STARTED",
                 extra={
                     "job_id": job_id,
                     "user_id": job.user_id,
                     "trace_id": job.trace_id,
-                    "stage": "worker_start",
-                    "status": "success"
+                    "stage": "processing",
+                    "status": "STARTED"
                 }
             )
 
@@ -82,7 +85,17 @@ class VideoWorker:
                 ResourceManager.check_stage_budget("ANALYSIS", settings.MAX_RAM_MB)
                 clips = []
                 for i, file in enumerate(files):
-                    logger.info(f"Analyzing file {file.file_path}", extra={"trace_id": job.trace_id})
+                    analyze_start = time.time()
+                    logger.info(
+                        "TRACE_ANALYSIS_STARTED",
+                        extra={
+                            "job_id": job_id,
+                            "trace_id": job.trace_id,
+                            "file_path": file.file_path,
+                            "stage": "processing",
+                            "status": "STARTED"
+                        }
+                    )
                     analyzer = VideoAnalyzer(file.file_path)
                     scenes = analyzer.detect_scenes()
                     scenes = analyzer.analyze_movement(scenes)
@@ -98,6 +111,22 @@ class VideoWorker:
                     # Integration note: Master Editor needs ALL clips for global hook
                     scored_scenes = analyzer.generate_quality_scores(scenes, silences)
                     clips.append(VideoClip(path=file.file_path, scenes=scored_scenes))
+
+                    duration_ms = int((time.time() - analyze_start) * 1000)
+                    logger.info(
+                        "TRACE_ANALYSIS_SUCCESS",
+                        extra={
+                            "job_id": job_id,
+                            "trace_id": job.trace_id,
+                            "file_path": file.file_path,
+                            "stage": "processing",
+                            "status": "SUCCESS",
+                            "duration_ms": duration_ms,
+                            "details": {
+                                "scene_count": len(scored_scenes)
+                            }
+                        }
+                    )
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
                     await self._update_progress(job_id, progress)
@@ -202,26 +231,32 @@ class VideoWorker:
                 output_filename = f"final_{job_id}.mp4"
                 output_path = os.path.abspath(os.path.join(settings.TEMP_STORAGE_PATH, output_filename))
 
+                render_start = time.time()
                 logger.info(
-                    "TRACE_FFMPEG_STARTED",
+                    "TRACE_RENDER_STARTED",
                     extra={
                         "job_id": job_id,
                         "user_id": job.user_id,
                         "trace_id": job.trace_id,
-                        "stage": "rendering",
-                        "status": "start"
+                        "stage": "render",
+                        "status": "STARTED"
                     }
                 )
                 self.renderer.render_final_video(timeline, all_subtitles, output_path)
+                render_dur = int((time.time() - render_start) * 1000)
                 logger.info(
-                    "TRACE_FFMPEG_FINISHED",
+                    "TRACE_RENDER_SUCCESS",
                     extra={
                         "job_id": job_id,
                         "user_id": job.user_id,
                         "trace_id": job.trace_id,
                         "file_path": output_path,
-                        "stage": "rendering",
-                        "status": "success"
+                        "stage": "render",
+                        "status": "SUCCESS",
+                        "duration_ms": render_dur,
+                        "details": {
+                            "file_size": os.path.getsize(output_path) if os.path.exists(output_path) else 0
+                        }
                     }
                 )
 
@@ -253,8 +288,9 @@ class VideoWorker:
                 if not os.path.exists(final_output_path):
                      raise FileNotFoundError(f"Final output video missing: {final_output_path}")
 
+                delivery_start = time.time()
                 logger.info(
-                    "TRACE_TELEGRAM_SEND_ATTEMPT",
+                    "TRACE_DELIVERY_STARTED",
                     extra={
                         "job_id": job_id,
                         "user_id": user.telegram_id,
@@ -262,7 +298,7 @@ class VideoWorker:
                         "file_path": final_output_path,
                         "file_size": os.path.getsize(final_output_path),
                         "stage": "delivery",
-                        "status": "attempt"
+                        "status": "STARTED"
                     }
                 )
 
@@ -278,14 +314,19 @@ class VideoWorker:
                             caption="🎬 Your AI edited video is ready! Done."
                         )
                         sent = True
+                        duration_ms = int((time.time() - delivery_start) * 1000)
                         logger.info(
-                            "TRACE_TELEGRAM_SEND_RESULT",
+                            "TRACE_DELIVERY_SUCCESS",
                             extra={
                                 "job_id": job_id,
                                 "user_id": user.telegram_id,
                                 "trace_id": job.trace_id,
-                                "status": "success",
-                                "response": str(response),
+                                "status": "SUCCESS",
+                                "duration_ms": duration_ms,
+                                "details": {
+                                    "response": str(response),
+                                    "message_id": response.message_id if hasattr(response, 'message_id') else None
+                                },
                                 "stage": "delivery"
                             }
                         )
@@ -296,13 +337,14 @@ class VideoWorker:
 
                 if not sent:
                     logger.error(
-                        "TRACE_TELEGRAM_SEND_RESULT",
+                        "TRACE_DELIVERY_FAILED",
                         extra={
                             "job_id": job_id,
                             "user_id": user.telegram_id,
                             "trace_id": job.trace_id,
-                            "status": "fail",
-                            "stage": "delivery"
+                            "status": "FAILED",
+                            "stage": "delivery",
+                            "error": "Failed to deliver video after 3 attempts"
                         }
                     )
                     raise RuntimeError("Failed to deliver video after 3 attempts")

@@ -31,6 +31,9 @@ async def cmd_start(message: types.Message):
 
 @router.message(F.video)
 async def handle_video(message: types.Message, state: FSMContext, bot):
+    import time
+    start_time = time.time()
+
     # 1. Strict Validation
     if not message.video or message.video.mime_type not in ['video/mp4', 'video/quicktime', 'video/x-matroska']:
         return await message.answer("Unsupported file format. Please send MP4, MOV or MKV.")
@@ -131,17 +134,23 @@ async def handle_video(message: types.Message, state: FSMContext, bot):
         session.commit()
 
         job = session.get(Job, job_id)
+        duration_ms = int((time.time() - start_time) * 1000)
         logger.info(
-            "TRACE_UPLOAD_RECEIVED",
+            "TRACE_UPLOAD_SUCCESS",
             extra={
                 "job_id": job_id,
                 "user_id": message.from_user.id,
-                "file_path": local_path,
-                "file_size": message.video.file_size,
-                "file_count": file_count,
                 "trace_id": job.trace_id,
-                "stage": "upload",
-                "status": "success"
+                "stage": "telegram_upload",
+                "status": "SUCCESS",
+                "duration_ms": duration_ms,
+                "details": {
+                    "file_id": message.video.file_id,
+                    "message_id": message.message_id,
+                    "file_path": local_path,
+                    "file_size": message.video.file_size,
+                    "file_count": file_count
+                }
             }
         )
 

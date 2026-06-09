@@ -98,22 +98,29 @@ def setup_env():
 def start_worker(env):
     """Start and monitor RQ worker."""
     logger.info("⚙️ Launching background worker...")
-    try:
-        import rq
-    except ImportError:
-        logger.error("❌ RQ not found in python path.")
-        return None
 
-    worker_proc = subprocess.Popen(
-        [sys.executable, "app/workers/rq_worker.py"],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
-    logger.info(f"Worker started with PID {worker_proc.pid}")
-    return worker_proc
+    # In Codespaces, we might need to find the rq executable
+    rq_cmd = shutil.which("rq")
+    if not rq_cmd:
+         # Fallback to python module
+         rq_cmd_args = [sys.executable, "-m", "rq", "worker", "video_processing"]
+    else:
+         rq_cmd_args = [rq_cmd, "worker", "video_processing"]
+
+    try:
+        worker_proc = subprocess.Popen(
+            rq_cmd_args,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        logger.info(f"Worker started with PID {worker_proc.pid} via {rq_cmd_args}")
+        return worker_proc
+    except Exception as e:
+        logger.error(f"❌ Failed to launch worker: {e}")
+        return None
 
 def main():
     os.makedirs("logs", exist_ok=True)
@@ -192,8 +199,11 @@ def main():
                 logger.info(f"🔄 Restarting worker (Attempt {worker_restarts}/3)...")
                 processes.remove(worker_proc)
                 worker_proc = start_worker(env)
-                processes.append(worker_proc)
-                threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
+                if worker_proc:
+                    processes.append(worker_proc)
+                    threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
+                else:
+                    break
             else:
                 logger.critical("❌ Worker failed permanently after 3 restarts.")
                 break
