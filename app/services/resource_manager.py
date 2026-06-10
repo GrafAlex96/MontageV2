@@ -24,9 +24,15 @@ class ResourceManager:
         used_mb = ResourceManager.get_memory_used_mb()
         if used_mb >= limit_mb:
             return "HARD_LIMIT"
+        # Soft limit at 70% of budget
         if used_mb >= 0.7 * limit_mb:
             return "SOFT_LIMIT"
         return "HEALTHY"
+
+    @staticmethod
+    def is_safe_mode_needed(limit_mb: int) -> bool:
+        """Check if adaptive safe mode should be activated."""
+        return ResourceManager.get_memory_status(limit_mb) != "HEALTHY"
 
     @staticmethod
     def cleanup_zombie_processes():

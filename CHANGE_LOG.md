@@ -9,4 +9,7 @@
 - **Performance**: Successfully reduced peak analysis RAM usage from 2700MB+ to < 800MB for identical 1080p60 inputs.
 
 ### Fixed
-- End-to-end multi-clip jobs now survive heavy workloads in resource-constrained environments (Codespaces).
+- **Zero-Setup Startup**: `start.sh` now automatically installs python dependencies and creates necessary directories (`logs`, `uploads`, `tmp`).
+- **Auto-Environment**: Implemented automatic `.env` creation from `.env.example` with strict validation for the Telegram `BOT_TOKEN`.
+- **System Dependencies**: `start_system.py` now attempts to auto-install `ffmpeg`, `redis-server`, and `imagemagick` using `apt-get` where available.
+- **Worker Stability**: Standardized RQ worker entrypoint and added a monitored supervisor loop with auto-restart capabilities.

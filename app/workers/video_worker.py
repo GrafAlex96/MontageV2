@@ -131,13 +131,15 @@ class VideoWorker:
                             "trace_id": job.trace_id,
                             "file_path": file.file_path,
                             "stage": "processing",
+                            "stage_name": "ANALYSIS_SCENE_SCORING",
                             "status": "SUCCESS",
                             "duration_ms": duration_ms,
+                            "processing_time_ms": duration_ms,
                             "memory_after_MB": ResourceManager.get_memory_used_mb(),
+                            "frame_count_processed": frame_count // frame_skip,
+                            "resolution_used": f"{max_width}p",
                             "details": {
                                 "scene_count": len(scored_scenes),
-                                "frame_count_processed": frame_count // frame_skip,
-                                "resolution_used": f"{max_width}p",
                                 "frame_skip": frame_skip
                             }
                         }

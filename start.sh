@@ -1,12 +1,22 @@
 #!/bin/bash
-# FULLY AUTOMATED ONE-COMMAND STARTUP SCRIPT
-# AI Video Editor Bot - v3.4.3 STABLE
+# FULLY AUTOMATED ZERO-SETUP STARTUP SCRIPT
+# AI Video Editor Bot - Production Readiness Edition
 
-echo "🎬 Starting AI Video Editor System..."
+echo "🎬 Starting AI Video Editor System Bootstrapper..."
 
-# 1. Ensure logs directory exists
-mkdir -p logs
+# 1. Ensure core directories exist
+mkdir -p logs uploads tmp
 
-# 2. Run the Unified Startup Manager
-# This script handles System Deps, Redis, .env, DB, Worker, and Bot
-PYTHONPATH=. python3 start_system.py
+# 2. Check and install Python dependencies
+echo "🐍 Verifying Python environment..."
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt --quiet
+    echo "✅ Python dependencies verified."
+fi
+
+# 3. Set PYTHONPATH to root for internal imports
+export PYTHONPATH=.
+
+# 4. Execute the Unified Startup Manager
+# This script handles System Deps (apt), Redis, .env, DB, Worker, and Bot
+python3 start_system.py

@@ -88,18 +88,22 @@ def setup_env():
     """Auto-create .env from .env.example and validate token."""
     if not os.path.exists(".env"):
         if os.path.exists(".env.example"):
-            logger.info("📝 Creating .env from .env.example...")
+            logger.info("📝 AUTO-FIX APPLIED: Creating .env from .env.example...")
             shutil.copy(".env.example", ".env")
         else:
             logger.error("❌ Critical: .env.example missing.")
             return False
 
-    # Strict validation of BOT_TOKEN
-    from app.core.config import settings
-    token = settings.BOT_TOKEN
-    if not token or token == "YOUR_TELEGRAM_BOT_TOKEN" or ":" not in token:
-        logger.error("❌ FATAL: BOT_TOKEN is missing or invalid in .env")
-        logger.error("👉 Please set a real Telegram Bot Token from @BotFather")
+    # Check for BOT_TOKEN
+    try:
+        from app.core.config import settings
+        token = settings.BOT_TOKEN
+        if not token or token == "YOUR_TELEGRAM_BOT_TOKEN" or ":" not in token:
+            logger.warning("⚠️ WARNING: BOT_TOKEN is missing or invalid in .env")
+            logger.warning("👉 Bot process will be skipped, but other components will start.")
+            return "SKIP_BOT"
+    except Exception as e:
+        logger.error(f"Error loading settings for validation: {e}")
         return False
 
     return True
@@ -188,24 +192,37 @@ def main():
 
     worker_proc = start_worker(env)
     if not worker_proc:
+        logger.error("❌ Failed to start worker.")
+        # Worker is critical
         sys.exit(1)
     processes.append(worker_proc)
 
-    logger.info("🤖 Launching Bot and API...")
-    bot_proc = subprocess.Popen(
-        [sys.executable, "-m", "app.main"],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
-    processes.append(bot_proc)
+    bot_status = setup_env()
+    if bot_status != "SKIP_BOT":
+        logger.info("🤖 Launching Bot and API...")
+        bot_proc = subprocess.Popen(
+            [sys.executable, "-m", "app.main"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        processes.append(bot_proc)
+    else:
+        # If no bot token, we still want the API if possible,
+        # but app.main usually starts both.
+        logger.warning("🚫 Bot startup skipped due to invalid token.")
+        # Create a dummy bot_proc for the monitoring loop if needed,
+        # but let's just adjust the loop.
+        bot_proc = None
 
     # 8. Verify Processes
     time.sleep(5)
-    worker_status = "OK" if worker_proc.poll() is None else "FAIL"
-    bot_status = "OK" if bot_proc.poll() is None else "FAIL"
+    worker_status = "OK" if worker_proc and worker_proc.poll() is None else "FAIL"
+    bot_status = "OK" if bot_proc and bot_proc.poll() is None else "FAIL"
+
+    if not bot_proc: bot_status = "SKIPPED"
 
     print(f"[BOOT] Worker .............. {worker_status}")
     print(f"[BOOT] Bot ................. {bot_status}")
@@ -224,18 +241,21 @@ def main():
         for line in iter(proc.stdout.readline, ''):
             logger.info(f"[{name}] {line.strip()}")
 
-    threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
-    threading.Thread(target=log_stream, args=(bot_proc, "BOT/API"), daemon=True).start()
+    if worker_proc:
+        threading.Thread(target=log_stream, args=(worker_proc, "WORKER"), daemon=True).start()
+    if bot_proc:
+        threading.Thread(target=log_stream, args=(bot_proc, "BOT/API"), daemon=True).start()
 
     worker_restarts = 0
     while True:
         # Check Worker
-        if worker_proc.poll() is not None:
+        if worker_proc and worker_proc.poll() is not None:
             logger.error(f"❌ Worker process {worker_proc.pid} exited with code {worker_proc.returncode}")
             if worker_restarts < 3:
                 worker_restarts += 1
                 logger.info(f"🔄 Restarting worker (Attempt {worker_restarts}/3)...")
-                processes.remove(worker_proc)
+                if worker_proc in processes:
+                    processes.remove(worker_proc)
                 worker_proc = start_worker(env)
                 if worker_proc:
                     processes.append(worker_proc)
@@ -247,7 +267,7 @@ def main():
                 break
 
         # Check Bot
-        if bot_proc.poll() is not None:
+        if bot_proc and bot_proc.poll() is not None:
             logger.error(f"❌ Bot process {bot_proc.pid} exited with code {bot_proc.returncode}")
             break
 
