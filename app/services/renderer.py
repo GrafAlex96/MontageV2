@@ -11,7 +11,7 @@ class Renderer:
         self.target_size = (settings.TARGET_WIDTH, settings.TARGET_HEIGHT)
         self.fps = settings.TARGET_FPS
 
-    def render_final_video(self, timeline: List[Dict], subtitles: List[Dict], output_path: str):
+    def render_final_video(self, timeline: List[Dict], subtitles: List[Dict], output_path: str, simple_mode: bool = False):
         """Assemble segments, apply subtitles, and render final video."""
         clips = []
 
@@ -24,16 +24,16 @@ class Renderer:
             # Resize and crop to 9:16 vertical
             clip = self._prepare_for_social(clip)
 
-            # Apply Pattern Interrupts (Zoom, Speed shifts)
-            if i % 2 == 0:
+            # Apply Pattern Interrupts (Zoom, Speed shifts) - Skip in simple mode
+            if not simple_mode and i % 2 == 0:
                 clip = self._apply_zoom_interrupt(clip)
 
             clips.append(clip)
 
         final_clip = concatenate_videoclips(clips, method="compose")
 
-        # Add subtitles if provided
-        if subtitles:
+        # Add subtitles if provided - Skip in simple mode
+        if subtitles and not simple_mode:
             final_clip = self._add_subtitles(final_clip, subtitles)
 
         # Use a timeout for writing video file to prevent infinite hangs

@@ -127,3 +127,48 @@ class TimelineManager:
                 synced_timeline.append(item)
 
         return synced_timeline
+
+    def build_fallback_timeline(self, video_paths: List[str]) -> List[Dict]:
+        """
+        SAFE-MODE FALLBACK: Creates a simple timeline by taking chunks from available videos
+        without heavy analysis. Ensures the pipeline ALWAYS produces a video.
+        """
+        if not video_paths:
+            return []
+
+        logger.warning(f"BUILDING FALLBACK TIMELINE for {len(video_paths)} videos")
+
+        selected_timeline = []
+        cumulative_cursor = 0.0
+
+        # Calculate how much time to take from each video
+        per_video_duration = self.target_duration / len(video_paths)
+
+        # Minimum segment duration to avoid flicker
+        per_video_duration = max(per_video_duration, 2.0)
+
+        for path in video_paths:
+            if cumulative_cursor >= self.target_duration:
+                break
+
+            # Assume 10s as a safe starting point if we don't want to ffprobe here
+            # But it's better to take it from the middle of the clip
+            remaining = self.target_duration - cumulative_cursor
+            chunk_dur = min(per_video_duration, remaining)
+
+            if chunk_dur < 0.1: break
+
+            # Create a synthetic scene starting at 1.0s (to avoid black frames)
+            # We don't know the actual duration, but FFmpeg will handle it if we overshoot usually
+            # or we can use a small chunk.
+            scene = Scene(
+                start_time=1.0,
+                end_time=1.0 + chunk_dur,
+                score=1.0,
+                timeline_offset=cumulative_cursor
+            )
+
+            selected_timeline.append({'path': path, 'scene': scene})
+            cumulative_cursor += chunk_dur
+
+        return selected_timeline

@@ -80,6 +80,7 @@ class VideoWorker:
             try:
                 # 1. Fetch files
                 files = session.execute(select(UploadedFile).where(UploadedFile.job_id == job_id)).scalars().all()
+                video_paths = [f.file_path for f in files]
 
                 # 2. Analyze
                 mem_before = ResourceManager.get_memory_used_mb()
@@ -89,134 +90,139 @@ class VideoWorker:
 
                 clips = []
                 for i, file in enumerate(files):
-                    analyze_start = time.time()
+                    try:
+                        analyze_start = time.time()
 
-                    # Adaptive safety: check RAM usage
-                    mem_usage_pct = ResourceManager.get_memory_usage()
-                    mem_status = ResourceManager.get_memory_status(settings.MAX_RAM_MB)
+                        # Adaptive safety: check RAM usage
+                        mem_usage_pct = ResourceManager.get_memory_usage()
+                        mem_status = ResourceManager.get_memory_status(settings.MAX_RAM_MB)
 
-                    # Aggressive Safe Mode
-                    is_aggressive = settings.SAFE_MODE or mem_status == "SOFT_LIMIT" or not analysis_ok
-                    frame_skip = 15 if is_aggressive else 5
-                    max_width = 480 if is_aggressive else 720
-                    skip_movement = (mem_usage_pct > 75) or (not analysis_ok)
+                        # Aggressive Safe Mode
+                        is_aggressive = settings.SAFE_MODE or mem_status == "SOFT_LIMIT" or not analysis_ok
+                        frame_skip = 15 if is_aggressive else 5
+                        max_width = 480 if is_aggressive else 720
+                        skip_movement = (mem_usage_pct > 75) or (not analysis_ok)
 
-                    logger.info(
-                        "TRACE_ANALYSIS_STARTED",
-                        extra={
-                            "job_id": job_id,
-                            "trace_id": job.trace_id,
-                            "file_path": file.file_path,
-                            "stage": "processing",
-                            "status": "STARTED",
-                            "memory_before_MB": ResourceManager.get_memory_used_mb(),
-                            "adaptive_mode": "AGGRESSIVE" if is_aggressive else "NORMAL",
-                            "skip_movement": skip_movement
-                        }
-                    )
-
-                    analyzer = VideoAnalyzer(file.file_path, frame_skip=frame_skip, max_width=max_width)
-                    frame_count = analyzer.get_frame_count()
-                    scenes = analyzer.detect_scenes()
-                    scenes = analyzer.analyze_movement(scenes, skip_movement=skip_movement)
-                    silences = analyzer.detect_silence()
-
-                    # --- CONSOLIDATED MASTER EDITOR PIPELINE ---
-                    # STEP 1: Story Intelligence
-                    story_data = self.story_intel.analyze_content(scenes)
-
-                    # STEP 2: Director Agent (Suggestions only)
-                    director_suggestions = self.director.suggest_strategy(story_data)
-
-                    # Integration note: Master Editor needs ALL clips for global hook
-                    scored_scenes = analyzer.generate_quality_scores(scenes, silences)
-                    clips.append(VideoClip(path=file.file_path, scenes=scored_scenes))
-
-                    duration_ms = int((time.time() - analyze_start) * 1000)
-                    logger.info(
-                        "TRACE_ANALYSIS_SUCCESS",
-                        extra={
-                            "job_id": job_id,
-                            "trace_id": job.trace_id,
-                            "file_path": file.file_path,
-                            "stage": "processing",
-                            "stage_name": "ANALYSIS_SCENE_SCORING",
-                            "status": "SUCCESS",
-                            "duration_ms": duration_ms,
-                            "processing_time_ms": duration_ms,
-                            "memory_after_MB": ResourceManager.get_memory_used_mb(),
-                            "frame_count_processed": frame_count // frame_skip,
-                            "resolution_used": f"{max_width}p",
-                            "details": {
-                                "scene_count": len(scored_scenes),
-                                "frame_skip": frame_skip
+                        logger.info(
+                            "TRACE_ANALYSIS_STARTED",
+                            extra={
+                                "job_id": job_id,
+                                "trace_id": job.trace_id,
+                                "file_path": file.file_path,
+                                "stage": "processing",
+                                "status": "STARTED",
+                                "memory_before_MB": ResourceManager.get_memory_used_mb(),
+                                "adaptive_mode": "AGGRESSIVE" if is_aggressive else "NORMAL",
+                                "skip_movement": skip_movement
                             }
-                        }
-                    )
+                        )
 
-                    # Cleanup after each file
-                    del analyzer
-                    del scenes
-                    gc.collect()
+                        analyzer = VideoAnalyzer(file.file_path, policy={
+                            "frame_skip": frame_skip,
+                            "max_width": max_width,
+                            "cap_frames": 300 if is_aggressive else 1000,
+                            "analyze_movement": not skip_movement,
+                            "analyze_audio": True
+                        })
+
+                        frame_count = analyzer.get_frame_count()
+                        scenes = analyzer.detect_scenes()
+                        scenes = analyzer.analyze_movement(scenes, skip_movement=skip_movement)
+                        silences = analyzer.detect_silence()
+
+                        # --- CONSOLIDATED MASTER EDITOR PIPELINE ---
+                        # STEP 1: Story Intelligence
+                        story_data = self.story_intel.analyze_content(scenes)
+
+                        # STEP 2: Director Agent (Suggestions only)
+                        # director_suggestions = self.director.suggest_strategy(story_data)
+
+                        # Integration note: Master Editor needs ALL clips for global hook
+                        scored_scenes = analyzer.generate_quality_scores(scenes, silences)
+                        clips.append(VideoClip(path=file.file_path, scenes=scored_scenes))
+
+                        duration_ms = int((time.time() - analyze_start) * 1000)
+                        logger.info(
+                            "TRACE_ANALYSIS_SUCCESS",
+                            extra={
+                                "job_id": job_id,
+                                "trace_id": job.trace_id,
+                                "file_path": file.file_path,
+                                "stage": "processing",
+                                "status": "SUCCESS",
+                                "duration_ms": duration_ms,
+                                "memory_after_MB": ResourceManager.get_memory_used_mb()
+                            }
+                        )
+                    except Exception as e:
+                        logger.error(f"Analysis failed for file {file.file_path}: {e}", extra={"trace_id": job.trace_id})
+                        # Don't raise, we might have other clips or fallback
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
                     await self._update_progress(job_id, progress)
 
                 # 3. Consolidated Unified Pipeline
-                # Memory cleanup before heavy processing
-                ResourceManager.check_stage_budget("PIPELINE", settings.MAX_RAM_MB)
-
                 session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.PROCESSING))
                 session.commit()
 
-                # STEP 1: Orchestrate
-                master_plan = self.orchestrator.create_master_plan(clips, job.target_duration)
-                strategy = master_plan["strategy"]
-                base_rules = master_plan["rules"]
+                timeline = None
 
-                # STEP 2: Detect beats
-                clip_beats = {}
-                for clip in clips:
-                    beat_data = self.audio_service.detect_beats(clip.path)
-                    if beat_data["confidence"] > 0.4:
-                        clip_beats[clip.path] = beat_data["beats"]
+                # TRY SMART PIPELINE
+                if clips:
+                    try:
+                        # STEP 1: Orchestrate
+                        master_plan = self.orchestrator.create_master_plan(clips, job.target_duration)
+                        strategy = master_plan["strategy"]
+                        base_rules = master_plan["rules"]
 
-                # STEP 3: Quality Retries Loop (Unified via RetryEngine)
-                best_timeline = None
-                best_score = -1.0
-                current_rules = base_rules
+                        # STEP 2: Detect beats
+                        clip_beats = {}
+                        for clip in clips:
+                            try:
+                                beat_data = self.audio_service.detect_beats(clip.path)
+                                if beat_data["confidence"] > 0.4:
+                                    clip_beats[clip.path] = beat_data["beats"]
+                            except: pass
 
-                # Global Mode decision from orchestrator
-                master_mode = master_plan["beat_sync_mode"]
+                        # STEP 3: Quality Retries Loop
+                        best_timeline = None
+                        best_score = -1.0
+                        current_rules = base_rules
+                        master_mode = master_plan["beat_sync_mode"]
 
-                for attempt in range(settings.MAX_RETRIES + 1):
-                    tm = TimelineManager(target_duration=job.target_duration, editing_rules=current_rules)
+                        for attempt in range(settings.MAX_RETRIES + 1):
+                            tm = TimelineManager(target_duration=job.target_duration, editing_rules=current_rules)
+                            final_mode = "VISUAL" if current_rules.get('disable_sync') else master_mode
 
-                    # Final fallback if retry engine disables sync
-                    final_mode = "VISUAL" if current_rules.get('disable_sync') else master_mode
+                            current_timeline = tm.build_combined_timeline_from_items(
+                                strategy["final_timeline"],
+                                clip_beats=clip_beats,
+                                mode=final_mode
+                            )
 
-                    current_timeline = tm.build_combined_timeline_from_items(
-                        strategy["final_timeline"],
-                        clip_beats=clip_beats,
-                        mode=final_mode
-                    )
+                            current_scores = self.quality_gate.calculate_scores(current_timeline)
+                            current_total = sum(current_scores.values())
 
-                    current_scores = self.quality_gate.calculate_scores(current_timeline)
-                    current_total = sum(current_scores.values())
+                            if current_total > best_score:
+                                best_score = current_total
+                                best_timeline = current_timeline
 
-                    if current_total > best_score:
-                        best_score = current_total
-                        best_timeline = current_timeline
+                            if self.quality_gate.is_production_ready(current_scores):
+                                break
+                            current_rules = self.retry_engine.execute(attempt + 1, base_rules)
 
-                    if self.quality_gate.is_production_ready(current_scores):
-                        break
+                        timeline = best_timeline
+                    except Exception as e:
+                        logger.error(f"Smart pipeline failed, falling back: {e}", extra={"trace_id": job.trace_id})
 
-                    if not self.retry_engine.should_continue(attempt + 1, current_total, best_score):
-                        break
+                # FALLBACK PIPELINE GUARANTEE
+                if not timeline:
+                    logger.warning("PIPELINE_GUARANTEE: Activating Fallback Timeline", extra={"trace_id": job.trace_id})
+                    tm = TimelineManager(target_duration=job.target_duration)
+                    timeline = tm.build_fallback_timeline(video_paths)
 
-                    current_rules = self.retry_engine.execute(attempt + 1, base_rules)
-
-                timeline = best_timeline
+                if not timeline:
+                    raise VideoEditorError("Failed to create even a fallback timeline. Aborting.")
 
                 # 4. Transcription (Multi-video support)
                 all_subtitles = []
@@ -278,7 +284,13 @@ class VideoWorker:
                         "status": "STARTED"
                     }
                 )
-                self.renderer.render_final_video(timeline, all_subtitles, output_path)
+
+                try:
+                    self.renderer.render_final_video(timeline, all_subtitles, output_path)
+                except Exception as e:
+                    logger.error(f"Primary render failed: {e}. Attempting SIMPLE SAFE RENDER.", extra={"trace_id": job.trace_id})
+                    # Attempt render without subtitles and without effects
+                    self.renderer.render_final_video(timeline, [], output_path, simple_mode=True)
                 render_dur = int((time.time() - render_start) * 1000)
                 logger.info(
                     "TRACE_RENDER_SUCCESS",
@@ -305,7 +317,12 @@ class VideoWorker:
                 session.commit()
 
                 final_output_path = os.path.join(settings.TEMP_STORAGE_PATH, f"optimized_{output_filename}")
-                self.audio_service.improve_clarity(output_path, final_output_path)
+                try:
+                    self.audio_service.improve_clarity(output_path, final_output_path)
+                except Exception as e:
+                    logger.error(f"Audio optimization failed: {e}. Using original render.")
+                    import shutil
+                    shutil.copy2(output_path, final_output_path)
 
                 # 7. Final Validation
                 validation = FinalValidator.validate_output(final_output_path, job.target_duration)

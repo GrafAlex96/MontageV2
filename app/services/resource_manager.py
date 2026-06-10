@@ -19,20 +19,56 @@ class ResourceManager:
         return psutil.virtual_memory().used / (1024 * 1024)
 
     @staticmethod
-    def get_memory_status(limit_mb: int) -> str:
-        """Return 'HEALTHY', 'SOFT_LIMIT', or 'HARD_LIMIT'."""
+    def safe_mode_decision(limit_mb: int) -> dict:
+        """
+        Determine the allowed pipeline complexity based on current RAM state.
+        Returns a policy dictionary.
+        """
         used_mb = ResourceManager.get_memory_used_mb()
-        if used_mb >= limit_mb:
-            return "HARD_LIMIT"
-        # Soft limit at 70% of budget
-        if used_mb >= 0.7 * limit_mb:
-            return "SOFT_LIMIT"
-        return "HEALTHY"
+        usage_pct = (used_mb / limit_mb) * 100 if limit_mb > 0 else 0
+
+        # Policy Tiers
+        if usage_pct < 70:
+            return {
+                "mode": "FULL",
+                "frame_skip": 5,
+                "max_width": 720,
+                "analyze_movement": True,
+                "analyze_audio": True,
+                "cap_frames": 1000
+            }
+        elif 70 <= usage_pct < 85:
+            return {
+                "mode": "REDUCED",
+                "frame_skip": 15,
+                "max_width": 480,
+                "analyze_movement": True,
+                "analyze_audio": True,
+                "cap_frames": 500
+            }
+        elif 85 <= usage_pct < 92:
+            return {
+                "mode": "ULTRA_SAFE",
+                "frame_skip": 30,
+                "max_width": 360,
+                "analyze_movement": False,
+                "analyze_audio": False,
+                "cap_frames": 300
+            }
+        else:
+            return {
+                "mode": "MINIMAL",
+                "frame_skip": 60,
+                "max_width": 240,
+                "analyze_movement": False,
+                "analyze_audio": False,
+                "cap_frames": 100
+            }
 
     @staticmethod
-    def is_safe_mode_needed(limit_mb: int) -> bool:
-        """Check if adaptive safe mode should be activated."""
-        return ResourceManager.get_memory_status(limit_mb) != "HEALTHY"
+    def get_memory_status(limit_mb: int) -> str:
+        decision = ResourceManager.safe_mode_decision(limit_mb)
+        return decision["mode"]
 
     @staticmethod
     def cleanup_zombie_processes():

@@ -5,7 +5,7 @@ from typing import Optional
 class Settings(BaseSettings):
     BOT_TOKEN: str = "YOUR_TELEGRAM_BOT_TOKEN"
     DATABASE_URL: str = "sqlite:///./video_editor.db"
-    TEMP_STORAGE_PATH: str = "./uploads"
+    TEMP_STORAGE_PATH: str = "./tmp"
     WHISPER_MODEL: str = "base"
 
     # Video settings

@@ -20,10 +20,18 @@ class Scene:
     timeline_offset: float = 0.0
 
 class VideoAnalyzer:
-    def __init__(self, video_path: str, frame_skip: int = 5, max_width: int = 720):
+    def __init__(self, video_path: str, policy: dict = None):
         self.video_path = video_path
-        self.frame_skip = frame_skip
-        self.max_width = max_width
+        self.policy = policy or {
+            "frame_skip": 5,
+            "max_width": 720,
+            "cap_frames": 1000,
+            "analyze_movement": True,
+            "analyze_audio": True
+        }
+        self.frame_skip = self.policy["frame_skip"]
+        self.max_width = self.policy["max_width"]
+
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
@@ -46,6 +54,8 @@ class VideoAnalyzer:
     def detect_scenes(self, threshold: float = 30.0) -> List[Scene]:
         """Detect scenes using color histogram changes with frame streaming and sampling."""
         import gc
+        from app.services.resource_manager import ResourceManager
+
         cap = cv2.VideoCapture(self.video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps == 0: fps = 30.0
@@ -54,16 +64,25 @@ class VideoAnalyzer:
         prev_hist = None
         start_frame = 0
         frame_idx = 0
+        processed_count = 0
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
+            # 1. Early stop if processed too many frames for this mode
+            if processed_count >= self.policy.get("cap_frames", 1000):
+                 break
+
+            # 2. Early stop if RAM critical
+            if frame_idx % 50 == 0 and ResourceManager.get_memory_usage() > 92:
+                 break
+
             # Sampling strategy
             if frame_idx % self.frame_skip != 0:
                 frame_idx += 1
-                del frame # Crucial to delete even if skipped
+                del frame
                 continue
 
             # Downscale for memory efficiency
@@ -83,6 +102,7 @@ class VideoAnalyzer:
 
             # Explicit cleanup
             del frame
+            processed_count += 1
             if frame_idx % 50 == 0:
                 gc.collect()
 
@@ -95,7 +115,10 @@ class VideoAnalyzer:
 
     def analyze_movement(self, scenes: List[Scene], skip_movement: bool = False) -> List[Scene]:
         """Analyze movement using incremental frame differencing and streaming."""
-        if skip_movement:
+        from app.services.resource_manager import ResourceManager
+
+        # Policy-based or manual skip
+        if skip_movement or not self.policy.get("analyze_movement", True):
             import logging
             logging.getLogger(__name__).warning("SAFE MODE: Skipping heavy movement analysis")
             return scenes
@@ -126,6 +149,13 @@ class VideoAnalyzer:
             step = max(self.frame_skip, frames_to_check // 30)
 
             for i in range(0, frames_to_check, step):
+                # Hard limit frames for movement too
+                if i > 50: break
+
+                # RAM Safety Check
+                if ResourceManager.get_memory_usage() > 90:
+                    break
+
                 ret, frame = cap.read()
                 if not ret: break
 
