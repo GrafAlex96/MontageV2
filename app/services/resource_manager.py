@@ -48,17 +48,18 @@ class ResourceManager:
                 continue
 
     @staticmethod
-    def check_stage_budget(stage_name: str, memory_limit_mb: int = 1500):
-        """Hard stage budget enforcement."""
+    def check_stage_budget(stage_name: str, memory_limit_mb: int = 1500) -> bool:
+        """Hard stage budget enforcement with graceful fallback."""
         import gc
         gc.collect() # Force cleanup before check
 
-        mem_info = psutil.virtual_memory()
-        used_mb = mem_info.used / (1024 * 1024)
+        used_mb = ResourceManager.get_memory_used_mb()
 
         if used_mb > memory_limit_mb:
-            logger.critical(f"STAGE BUDGET EXCEEDED: {stage_name} using {used_mb}MB (Limit: {memory_limit_mb}MB)")
-            raise RuntimeError(f"Memory budget exceeded in {stage_name}")
+            logger.warning(f"STAGE BUDGET EXCEEDED: {stage_name} using {used_mb:.2f}MB (Limit: {memory_limit_mb}MB)")
+            logger.warning("Switching to SAFE MODE fallback/degradation.")
+            return False
+        return True
 
     @staticmethod
     def limit_resources():

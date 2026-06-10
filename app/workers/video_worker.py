@@ -83,15 +83,23 @@ class VideoWorker:
 
                 # 2. Analyze
                 mem_before = ResourceManager.get_memory_used_mb()
-                ResourceManager.check_stage_budget("ANALYSIS", settings.MAX_RAM_MB)
+
+                # Check budget but don't fail immediately
+                analysis_ok = ResourceManager.check_stage_budget("ANALYSIS", settings.MAX_RAM_MB)
+
                 clips = []
                 for i, file in enumerate(files):
                     analyze_start = time.time()
 
-                    # Adaptive safety: check soft limit
+                    # Adaptive safety: check RAM usage
+                    mem_usage_pct = ResourceManager.get_memory_usage()
                     mem_status = ResourceManager.get_memory_status(settings.MAX_RAM_MB)
-                    frame_skip = 10 if mem_status == "SOFT_LIMIT" else 5
-                    max_width = 480 if mem_status == "SOFT_LIMIT" else 720
+
+                    # Aggressive Safe Mode
+                    is_aggressive = settings.SAFE_MODE or mem_status == "SOFT_LIMIT" or not analysis_ok
+                    frame_skip = 15 if is_aggressive else 5
+                    max_width = 480 if is_aggressive else 720
+                    skip_movement = (mem_usage_pct > 75) or (not analysis_ok)
 
                     logger.info(
                         "TRACE_ANALYSIS_STARTED",
@@ -102,14 +110,15 @@ class VideoWorker:
                             "stage": "processing",
                             "status": "STARTED",
                             "memory_before_MB": ResourceManager.get_memory_used_mb(),
-                            "adaptive_mode": mem_status
+                            "adaptive_mode": "AGGRESSIVE" if is_aggressive else "NORMAL",
+                            "skip_movement": skip_movement
                         }
                     )
 
                     analyzer = VideoAnalyzer(file.file_path, frame_skip=frame_skip, max_width=max_width)
                     frame_count = analyzer.get_frame_count()
                     scenes = analyzer.detect_scenes()
-                    scenes = analyzer.analyze_movement(scenes)
+                    scenes = analyzer.analyze_movement(scenes, skip_movement=skip_movement)
                     silences = analyzer.detect_silence()
 
                     # --- CONSOLIDATED MASTER EDITOR PIPELINE ---

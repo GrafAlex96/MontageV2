@@ -63,6 +63,7 @@ class VideoAnalyzer:
             # Sampling strategy
             if frame_idx % self.frame_skip != 0:
                 frame_idx += 1
+                del frame # Crucial to delete even if skipped
                 continue
 
             # Downscale for memory efficiency
@@ -82,7 +83,7 @@ class VideoAnalyzer:
 
             # Explicit cleanup
             del frame
-            if frame_idx % 100 == 0:
+            if frame_idx % 50 == 0:
                 gc.collect()
 
         total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -92,8 +93,13 @@ class VideoAnalyzer:
         gc.collect()
         return scenes
 
-    def analyze_movement(self, scenes: List[Scene]) -> List[Scene]:
+    def analyze_movement(self, scenes: List[Scene], skip_movement: bool = False) -> List[Scene]:
         """Analyze movement using incremental frame differencing and streaming."""
+        if skip_movement:
+            import logging
+            logging.getLogger(__name__).warning("SAFE MODE: Skipping heavy movement analysis")
+            return scenes
+
         import gc
         from dataclasses import replace
         cap = cv2.VideoCapture(self.video_path)
@@ -115,8 +121,9 @@ class VideoAnalyzer:
             movements = []
             frames_to_check = int((scene.end_time - scene.start_time) * fps)
 
-            # Adaptive step: ensure we check at least 10 points but skip enough to save RAM
-            step = max(self.frame_skip, frames_to_check // 20)
+            # Adaptive step: ensure we check at least points but skip enough to save RAM
+            # In SAFE MODE this will be even larger via self.frame_skip
+            step = max(self.frame_skip, frames_to_check // 30)
 
             for i in range(0, frames_to_check, step):
                 ret, frame = cap.read()
@@ -131,6 +138,7 @@ class VideoAnalyzer:
                 prev_gray = curr_gray
                 del frame
                 del curr_gray
+                if i % 10 == 0: gc.collect()
 
             score = float(np.mean(movements)) if movements else 0.0
             updated_scenes.append(replace(scene, movement_score=score))

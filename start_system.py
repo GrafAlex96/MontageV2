@@ -85,7 +85,7 @@ def start_redis():
             return False
 
 def setup_env():
-    """Auto-create .env from .env.example and validate token."""
+    """Auto-create .env from .env.example and validate token with duplicate protection."""
     if not os.path.exists(".env"):
         if os.path.exists(".env.example"):
             logger.info("📝 AUTO-FIX APPLIED: Creating .env from .env.example...")
@@ -94,17 +94,25 @@ def setup_env():
             logger.error("❌ Critical: .env.example missing.")
             return False
 
-    # Check for BOT_TOKEN
-    try:
-        from app.core.config import settings
-        token = settings.BOT_TOKEN
-        if not token or token == "YOUR_TELEGRAM_BOT_TOKEN" or ":" not in token:
-            logger.warning("⚠️ WARNING: BOT_TOKEN is missing or invalid in .env")
-            logger.warning("👉 Bot process will be skipped, but other components will start.")
-            return "SKIP_BOT"
-    except Exception as e:
-        logger.error(f"Error loading settings for validation: {e}")
-        return False
+    # Read and sanitize .env to prevent duplicates
+    env_vars = {}
+    with open(".env", "r") as f:
+        for line in f:
+            if "=" in line and not line.startswith("#"):
+                key, val = line.strip().split("=", 1)
+                env_vars[key.strip()] = val.strip()
+
+    # Rewrite .env without duplicates
+    with open(".env", "w") as f:
+        for key, val in env_vars.items():
+            f.write(f"{key}={val}\n")
+
+    # Strict Token Validation
+    token = env_vars.get("BOT_TOKEN", "").strip()
+    if not token or token == "YOUR_TELEGRAM_BOT_TOKEN" or ":" not in token or len(token) < 30:
+        logger.warning(f"⚠️ WARNING: BOT_TOKEN is missing or invalid ('{token}')")
+        logger.warning("👉 Bot process will be skipped.")
+        return "SKIP_BOT"
 
     return True
 
