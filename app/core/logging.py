@@ -4,8 +4,9 @@ from pythonjsonlogger import jsonlogger
 
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
+    # Strict JSON format as requested in Directive v1.0
     formatter = jsonlogger.JsonFormatter(
-        '%(asctime)s %(levelname)s %(message)s %(trace_id)s %(stage)s %(status)s %(details)s %(duration_ms)s %(error)s'
+        '{"trace_id": "%(trace_id)s", "stage": "%(stage)s", "timestamp": "%(asctime)s", "status": "%(status)s", "details": %(details)s, "duration_ms": %(duration_ms)s, "error": "%(error)s"}'
     )
     handler.setFormatter(formatter)
 

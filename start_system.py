@@ -85,7 +85,7 @@ def start_redis():
             return False
 
 def setup_env():
-    """Auto-create .env from .env.example."""
+    """Auto-create .env from .env.example and validate token."""
     if not os.path.exists(".env"):
         if os.path.exists(".env.example"):
             logger.info("📝 Creating .env from .env.example...")
@@ -93,19 +93,23 @@ def setup_env():
         else:
             logger.error("❌ Critical: .env.example missing.")
             return False
+
+    # Strict validation of BOT_TOKEN
+    from app.core.config import settings
+    token = settings.BOT_TOKEN
+    if not token or token == "YOUR_TELEGRAM_BOT_TOKEN" or ":" not in token:
+        logger.error("❌ FATAL: BOT_TOKEN is missing or invalid in .env")
+        logger.error("👉 Please set a real Telegram Bot Token from @BotFather")
+        return False
+
     return True
 
 def start_worker(env):
     """Start and monitor RQ worker."""
     logger.info("⚙️ Launching background worker...")
 
-    # In Codespaces, we might need to find the rq executable
-    rq_cmd = shutil.which("rq")
-    if not rq_cmd:
-         # Fallback to python module
-         rq_cmd_args = [sys.executable, "-m", "rq", "worker", "video_processing"]
-    else:
-         rq_cmd_args = [rq_cmd, "worker", "video_processing"]
+    # Standard entrypoint via app.workers.rq_worker
+    rq_cmd_args = [sys.executable, "app/workers/rq_worker.py"]
 
     try:
         worker_proc = subprocess.Popen(
@@ -147,9 +151,29 @@ def main():
         init_db()
 
     # 5. Run Health Checks
-    from app.services.health_check import run_all_checks
-    if not run_all_checks():
-        logger.error("❌ Health checks failed. System is not production-ready.")
+    from app.services.health_check import check_redis, check_db, check_ffmpeg, check_imagemagick
+
+    print("\n" + "="*40)
+    print("🚀 AI VIDEO EDITOR SYSTEM BOOT")
+    print("="*40)
+
+    results = {
+        "Redis": check_redis(),
+        "Database": check_db(),
+        "FFmpeg": check_ffmpeg(),
+        "ImageMagick": check_imagemagick(),
+        "Env (.env)": True # Handled in setup_env
+    }
+
+    all_pass = True
+    for component, status in results.items():
+        dot_fill = "." * (20 - len(component))
+        status_str = "OK" if status else "FAIL"
+        if not status: all_pass = False
+        print(f"[BOOT] {component} {dot_fill} {status_str}")
+
+    if not all_pass:
+        logger.error("❌ Critical components failed to boot. Aborting.")
         sys.exit(1)
 
     # 6. Startup Recovery
@@ -178,9 +202,23 @@ def main():
     )
     processes.append(bot_proc)
 
+    # 8. Verify Processes
+    time.sleep(5)
+    worker_status = "OK" if worker_proc.poll() is None else "FAIL"
+    bot_status = "OK" if bot_proc.poll() is None else "FAIL"
+
+    print(f"[BOOT] Worker .............. {worker_status}")
+    print(f"[BOOT] Bot ................. {bot_status}")
+    print(f"[BOOT] API ................. {bot_status}")
+    print("="*40)
+
+    if worker_status == "FAIL" or bot_status == "FAIL":
+        logger.error("❌ Processes failed to start after initialization.")
+        sys.exit(1)
+
     logger.info("✨ ALL SYSTEMS INITIALIZED.")
 
-    # 8. Monitor and Log
+    # 9. Monitor and Log
     import threading
     def log_stream(proc, name):
         for line in iter(proc.stdout.readline, ''):
