@@ -15,6 +15,20 @@ class ResourceManager:
         return psutil.virtual_memory().percent
 
     @staticmethod
+    def get_memory_used_mb() -> float:
+        return psutil.virtual_memory().used / (1024 * 1024)
+
+    @staticmethod
+    def get_memory_status(limit_mb: int) -> str:
+        """Return 'HEALTHY', 'SOFT_LIMIT', or 'HARD_LIMIT'."""
+        used_mb = ResourceManager.get_memory_used_mb()
+        if used_mb >= limit_mb:
+            return "HARD_LIMIT"
+        if used_mb >= 0.7 * limit_mb:
+            return "SOFT_LIMIT"
+        return "HEALTHY"
+
+    @staticmethod
     def cleanup_zombie_processes():
         """Find and terminate orphan ffmpeg/magick processes."""
         for proc in psutil.process_iter(['pid', 'name']):

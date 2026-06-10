@@ -14,6 +14,15 @@ class SubtitleService:
             self._model = whisper.load_model(self.model_name)
         return self._model
 
+    def unload_model(self):
+        """Free up memory by unloading the model."""
+        import gc
+        import torch
+        self._model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     def transcribe(self, video_path: str) -> List[Dict]:
         """Transcribe video and return short word-level segments (viral style)."""
         if not os.path.exists(video_path):

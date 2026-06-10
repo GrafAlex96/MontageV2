@@ -20,14 +20,32 @@ class Scene:
     timeline_offset: float = 0.0
 
 class VideoAnalyzer:
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, frame_skip: int = 5, max_width: int = 720):
         self.video_path = video_path
+        self.frame_skip = frame_skip
+        self.max_width = max_width
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
+    def _downscale_frame(self, frame):
+        """Downscale frame if it exceeds max_width."""
+        h, w = frame.shape[:2]
+        if w > self.max_width:
+            scale = self.max_width / w
+            new_w = self.max_width
+            new_h = int(h * scale)
+            return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        return frame
+
+    def get_frame_count(self) -> int:
+        cap = cv2.VideoCapture(self.video_path)
+        count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        return count
+
     def detect_scenes(self, threshold: float = 30.0) -> List[Scene]:
-        """Detect scenes using color histogram changes (optimized for large files)."""
-        # OpenCV handles large files via seeking and frame-by-frame reading
+        """Detect scenes using color histogram changes with frame streaming and sampling."""
+        import gc
         cap = cv2.VideoCapture(self.video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps == 0: fps = 30.0
@@ -42,10 +60,13 @@ class VideoAnalyzer:
             if not ret:
                 break
 
-            # Subsample frames for performance (chunk-based analysis)
-            if frame_idx % 10 != 0:
+            # Sampling strategy
+            if frame_idx % self.frame_skip != 0:
                 frame_idx += 1
                 continue
+
+            # Downscale for memory efficiency
+            frame = self._downscale_frame(frame)
 
             curr_hist = cv2.calcHist([frame], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
             curr_hist = cv2.normalize(curr_hist, curr_hist).flatten()
@@ -59,14 +80,21 @@ class VideoAnalyzer:
             prev_hist = curr_hist
             frame_idx += 1
 
+            # Explicit cleanup
+            del frame
+            if frame_idx % 100 == 0:
+                gc.collect()
+
         total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
         scenes.append(Scene(start_frame / fps, total_frames / fps))
 
         cap.release()
+        gc.collect()
         return scenes
 
     def analyze_movement(self, scenes: List[Scene]) -> List[Scene]:
-        """Analyze movement in each scene using frame differencing (Memory efficient)."""
+        """Analyze movement using incremental frame differencing and streaming."""
+        import gc
         from dataclasses import replace
         cap = cv2.VideoCapture(self.video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -80,32 +108,39 @@ class VideoAnalyzer:
                 updated_scenes.append(scene)
                 continue
 
+            prev_frame = self._downscale_frame(prev_frame)
             prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+            del prev_frame
+
             movements = []
-
             frames_to_check = int((scene.end_time - scene.start_time) * fps)
-            step = max(1, frames_to_check // 30)
 
-            # Use small buffer for chunk-based movement analysis
+            # Adaptive step: ensure we check at least 10 points but skip enough to save RAM
+            step = max(self.frame_skip, frames_to_check // 20)
+
             for i in range(0, frames_to_check, step):
                 ret, frame = cap.read()
                 if not ret: break
 
+                frame = self._downscale_frame(frame)
                 curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 flow = cv2.absdiff(prev_gray, curr_gray)
                 movement = np.mean(flow)
                 movements.append(movement)
-                prev_gray = curr_gray
 
-                # Proactive cleanup within the loop
-                if i % 10 == 0:
-                    del frame
-                    del curr_gray
+                prev_gray = curr_gray
+                del frame
+                del curr_gray
 
             score = float(np.mean(movements)) if movements else 0.0
             updated_scenes.append(replace(scene, movement_score=score))
 
+            # Cleanup after each scene
+            del prev_gray
+            gc.collect()
+
         cap.release()
+        gc.collect()
         return updated_scenes
 
     def detect_silence(self) -> List[Dict[str, float]]:

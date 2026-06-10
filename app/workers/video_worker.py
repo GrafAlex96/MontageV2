@@ -82,10 +82,17 @@ class VideoWorker:
                 files = session.execute(select(UploadedFile).where(UploadedFile.job_id == job_id)).scalars().all()
 
                 # 2. Analyze
+                mem_before = ResourceManager.get_memory_used_mb()
                 ResourceManager.check_stage_budget("ANALYSIS", settings.MAX_RAM_MB)
                 clips = []
                 for i, file in enumerate(files):
                     analyze_start = time.time()
+
+                    # Adaptive safety: check soft limit
+                    mem_status = ResourceManager.get_memory_status(settings.MAX_RAM_MB)
+                    frame_skip = 10 if mem_status == "SOFT_LIMIT" else 5
+                    max_width = 480 if mem_status == "SOFT_LIMIT" else 720
+
                     logger.info(
                         "TRACE_ANALYSIS_STARTED",
                         extra={
@@ -93,10 +100,14 @@ class VideoWorker:
                             "trace_id": job.trace_id,
                             "file_path": file.file_path,
                             "stage": "processing",
-                            "status": "STARTED"
+                            "status": "STARTED",
+                            "memory_before_MB": ResourceManager.get_memory_used_mb(),
+                            "adaptive_mode": mem_status
                         }
                     )
-                    analyzer = VideoAnalyzer(file.file_path)
+
+                    analyzer = VideoAnalyzer(file.file_path, frame_skip=frame_skip, max_width=max_width)
+                    frame_count = analyzer.get_frame_count()
                     scenes = analyzer.detect_scenes()
                     scenes = analyzer.analyze_movement(scenes)
                     silences = analyzer.detect_silence()
@@ -122,11 +133,20 @@ class VideoWorker:
                             "stage": "processing",
                             "status": "SUCCESS",
                             "duration_ms": duration_ms,
+                            "memory_after_MB": ResourceManager.get_memory_used_mb(),
                             "details": {
-                                "scene_count": len(scored_scenes)
+                                "scene_count": len(scored_scenes),
+                                "frame_count_processed": frame_count // frame_skip,
+                                "resolution_used": f"{max_width}p",
+                                "frame_skip": frame_skip
                             }
                         }
                     )
+
+                    # Cleanup after each file
+                    del analyzer
+                    del scenes
+                    gc.collect()
 
                     progress = 0.1 + (0.4 * (i + 1) / len(files))
                     await self._update_progress(job_id, progress)
@@ -201,6 +221,8 @@ class VideoWorker:
                         # Optimization: cache transcriptions per path during this job
                         if path not in transcription_cache:
                             transcription_cache[path] = self.subtitle_service.transcribe(path)
+                            # Partial memory release after each transcription
+                            gc.collect()
 
                         clip_subs = transcription_cache[path]
 
@@ -218,6 +240,9 @@ class VideoWorker:
                     logger.error(f"Multi-video transcription failed: {e}", extra={"trace_id": job.trace_id})
                     # Fallback: continue with empty or partial subtitles
 
+                # Full memory release for Whisper model
+                self.subtitle_service.unload_model()
+                transcription_cache.clear()
                 gc.collect() # Cleanup after transcription
                 await self._update_progress(job_id, 0.6)
 
@@ -388,6 +413,9 @@ class VideoWorker:
                 # Notify user
                 user = session.execute(select(User).where(User.id == job.user_id)).scalar_one()
                 await self.bot.send_message(user.telegram_id, f"Sorry, there was an error processing your video: {e}")
+            finally:
+                # Forced cleanup at end of job
+                gc.collect()
 
     async def _update_progress(self, job_id: int, progress: float):
         with get_db() as session:
