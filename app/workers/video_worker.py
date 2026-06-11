@@ -356,16 +356,27 @@ class VideoWorker:
                 )
 
                 video_file = types.FSInputFile(final_output_path)
+                file_size = os.path.getsize(final_output_path)
 
                 # Delivery pipeline with retry
                 sent = False
                 for attempt in range(3):
                     try:
-                        response = await self.bot.send_video(
-                            user.telegram_id,
-                            video_file,
-                            caption="🎬 Your AI edited video is ready! Done."
-                        )
+                        # Telegram Bot API limit for sendVideo is 50MB
+                        # For larger files, we MUST send as Document
+                        if file_size > 48 * 1024 * 1024:
+                            logger.info(f"File size {file_size} exceeds 50MB, switching to sendDocument")
+                            response = await self.bot.send_document(
+                                user.telegram_id,
+                                video_file,
+                                caption="🎬 Your video is ready (Sent as document due to size)."
+                            )
+                        else:
+                            response = await self.bot.send_video(
+                                user.telegram_id,
+                                video_file,
+                                caption="🎬 Your AI edited video is ready! Done."
+                            )
                         sent = True
                         duration_ms = int((time.time() - delivery_start) * 1000)
                         logger.info(

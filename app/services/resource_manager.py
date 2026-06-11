@@ -16,7 +16,20 @@ class ResourceManager:
 
     @staticmethod
     def get_memory_used_mb() -> float:
-        return psutil.virtual_memory().used / (1024 * 1024)
+        """Returns RAM used by the CURRENT process and its children in MB."""
+        process = psutil.Process(os.getpid())
+        mem_bytes = process.memory_info().rss
+        for child in process.children(recursive=True):
+            try:
+                mem_bytes += child.memory_info().rss
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        return mem_bytes / (1024 * 1024)
+
+    @staticmethod
+    def get_system_memory_usage_pct() -> float:
+        """Returns total system RAM usage percentage."""
+        return psutil.virtual_memory().percent
 
     @staticmethod
     def safe_mode_decision(limit_mb: int) -> dict:
@@ -24,11 +37,18 @@ class ResourceManager:
         Determine the allowed pipeline complexity based on current RAM state.
         Returns a policy dictionary.
         """
+        # We use a hybrid approach: check both process-specific MB and system-wide %
         used_mb = ResourceManager.get_memory_used_mb()
-        usage_pct = (used_mb / limit_mb) * 100 if limit_mb > 0 else 0
+        system_pct = ResourceManager.get_system_memory_usage_pct()
+
+        # Budget-based percentage (if we have a hard limit)
+        budget_pct = (used_mb / limit_mb) * 100 if limit_mb > 0 else 0
+
+        # Effective pressure is the maximum of budget exhaustion or system-wide pressure
+        effective_pct = max(budget_pct, system_pct)
 
         # Policy Tiers
-        if usage_pct < 70:
+        if effective_pct < 70:
             return {
                 "mode": "FULL",
                 "frame_skip": 5,
@@ -37,7 +57,7 @@ class ResourceManager:
                 "analyze_audio": True,
                 "cap_frames": 1000
             }
-        elif 70 <= usage_pct < 85:
+        elif 70 <= effective_pct < 85:
             return {
                 "mode": "REDUCED",
                 "frame_skip": 15,
@@ -46,7 +66,7 @@ class ResourceManager:
                 "analyze_audio": True,
                 "cap_frames": 500
             }
-        elif 85 <= usage_pct < 92:
+        elif 85 <= effective_pct < 92:
             return {
                 "mode": "ULTRA_SAFE",
                 "frame_skip": 30,
@@ -71,15 +91,32 @@ class ResourceManager:
         return decision["mode"]
 
     @staticmethod
-    def cleanup_zombie_processes():
-        """Find and terminate orphan ffmpeg/magick processes."""
-        for proc in psutil.process_iter(['pid', 'name']):
+    def cleanup_zombie_processes(max_age_seconds: int = 600):
+        """
+        Find and terminate orphan or hung ffmpeg/magick processes.
+        Kills processes older than max_age_seconds or in ZOMBIE status.
+        """
+        import time
+        current_time = time.time()
+        for proc in psutil.process_iter(['pid', 'name', 'create_time', 'status']):
             try:
-                if proc.info['name'] in ['ffmpeg', 'ffprobe', 'magick']:
-                    # Check if process is old or has no parent
-                    if proc.status() == psutil.STATUS_ZOMBIE:
-                        logger.info(f"Terminating zombie process: {proc.info}")
-                        proc.terminate()
+                # Target our processing tools
+                if proc.info['name'] in ['ffmpeg', 'ffprobe', 'magick', 'convert']:
+                    # 1. Kill zombies immediately
+                    if proc.info['status'] == psutil.STATUS_ZOMBIE:
+                        logger.warning(f"Killing zombie process: {proc.info}")
+                        # Zombie process cannot be killed by terminate, but its parent should reap it.
+                        # However, in our environment we often have orphans.
+                        # We try to kill it to ensure it's removed.
+                        proc.kill()
+                        continue
+
+                    # 2. Kill hung processes older than threshold
+                    age = current_time - proc.info['create_time']
+                    if age > max_age_seconds:
+                        logger.warning(f"Killing hung process (age {age:.1f}s): {proc.info}")
+                        proc.kill()
+
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -101,12 +138,12 @@ class ResourceManager:
     def limit_resources():
         """Set global process limits for the current worker."""
         cpu = ResourceManager.get_cpu_usage()
-        mem = ResourceManager.get_memory_usage()
+        mem = ResourceManager.get_system_memory_usage_pct()
 
         if cpu > 95:
             logger.error(f"System CPU critical ({cpu}%). Stopping task.")
             raise RuntimeError("CPU limit exceeded")
 
-        if mem > 90:
+        if mem > 94: # Slightly higher threshold for hard stop
             logger.error(f"System Memory critical ({mem}%). Stopping task.")
             raise RuntimeError("Memory limit exceeded")

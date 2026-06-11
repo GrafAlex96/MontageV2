@@ -134,6 +134,7 @@ class TimelineManager:
         without heavy analysis. Ensures the pipeline ALWAYS produces a video.
         """
         if not video_paths:
+            logger.error("Fallback timeline failed: No video paths provided.")
             return []
 
         logger.warning(f"BUILDING FALLBACK TIMELINE for {len(video_paths)} videos")
@@ -141,29 +142,34 @@ class TimelineManager:
         selected_timeline = []
         cumulative_cursor = 0.0
 
+        # Filter out missing files
+        valid_paths = [p for p in video_paths if os.path.exists(p)]
+        if not valid_paths:
+            logger.error("Fallback timeline failed: No valid video files found on disk.")
+            return []
+
         # Calculate how much time to take from each video
-        per_video_duration = self.target_duration / len(video_paths)
+        per_video_duration = self.target_duration / len(valid_paths)
 
         # Minimum segment duration to avoid flicker
         per_video_duration = max(per_video_duration, 2.0)
 
-        for path in video_paths:
+        for path in valid_paths:
             if cumulative_cursor >= self.target_duration:
                 break
 
-            # Assume 10s as a safe starting point if we don't want to ffprobe here
-            # But it's better to take it from the middle of the clip
             remaining = self.target_duration - cumulative_cursor
             chunk_dur = min(per_video_duration, remaining)
 
             if chunk_dur < 0.1: break
 
-            # Create a synthetic scene starting at 1.0s (to avoid black frames)
-            # We don't know the actual duration, but FFmpeg will handle it if we overshoot usually
-            # or we can use a small chunk.
+            # Robust Scene creation:
+            # We use a 1.0s start offset to bypass potential black frames/headers
+            # and a fixed duration. FFmpeg/MoviePy will handle if the clip is shorter
+            # by either erroring (which we catch) or just stopping.
             scene = Scene(
-                start_time=1.0,
-                end_time=1.0 + chunk_dur,
+                start_time=0.0,
+                end_time=chunk_dur,
                 score=1.0,
                 timeline_offset=cumulative_cursor
             )

@@ -3,6 +3,8 @@ from moviepy import VideoFileClip, concatenate_videoclips, TextClip, CompositeVi
 from typing import List, Dict
 import os
 from app.core.config import settings
+import signal
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -14,31 +16,7 @@ class Renderer:
     def render_final_video(self, timeline: List[Dict], subtitles: List[Dict], output_path: str, simple_mode: bool = False):
         """Assemble segments, apply subtitles, and render final video."""
         clips = []
-
-        for i, item in enumerate(timeline):
-            path = item['path']
-            scene = item['scene']
-
-            clip = VideoFileClip(path).subclipped(scene.start_time, scene.end_time)
-
-            # Resize and crop to 9:16 vertical
-            clip = self._prepare_for_social(clip)
-
-            # Apply Pattern Interrupts (Zoom, Speed shifts) - Skip in simple mode
-            if not simple_mode and i % 2 == 0:
-                clip = self._apply_zoom_interrupt(clip)
-
-            clips.append(clip)
-
-        final_clip = concatenate_videoclips(clips, method="compose")
-
-        # Add subtitles if provided - Skip in simple mode
-        if subtitles and not simple_mode:
-            final_clip = self._add_subtitles(final_clip, subtitles)
-
-        # Use a timeout for writing video file to prevent infinite hangs
-        import signal
-        from contextlib import contextmanager
+        final_clip = None
 
         @contextmanager
         def timeout(seconds):
@@ -52,6 +30,27 @@ class Renderer:
                 signal.alarm(0)
 
         try:
+            for i, item in enumerate(timeline):
+                path = item['path']
+                scene = item['scene']
+
+                clip = VideoFileClip(path).subclipped(scene.start_time, scene.end_time)
+
+                # Resize and crop to 9:16 vertical
+                clip = self._prepare_for_social(clip)
+
+                # Apply Pattern Interrupts (Zoom, Speed shifts) - Skip in simple mode
+                if not simple_mode and i % 2 == 0:
+                    clip = self._apply_zoom_interrupt(clip)
+
+                clips.append(clip)
+
+            final_clip = concatenate_videoclips(clips, method="compose")
+
+            # Add subtitles if provided - Skip in simple mode
+            if subtitles and not simple_mode:
+                final_clip = self._add_subtitles(final_clip, subtitles)
+
             # Single user mode: prefer quality over speed
             timeout_sec = settings.RENDER_TIMEOUT
             with timeout(timeout_sec):
@@ -83,15 +82,16 @@ class Renderer:
             raise
         finally:
             # Mandatory resource closure for Codespaces memory safety
+            if final_clip:
+                try:
+                    final_clip.close()
+                except:
+                    pass
             for clip in clips:
                 try:
                     clip.close()
                 except:
                     pass
-            try:
-                final_clip.close()
-            except:
-                pass
 
     def _apply_zoom_interrupt(self, clip: VideoFileClip) -> VideoFileClip:
         """Apply a slight zoom pattern interrupt."""
