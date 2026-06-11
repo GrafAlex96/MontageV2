@@ -1,7 +1,10 @@
 import whisper
 import os
+import logging
 from typing import List, Dict
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 class SubtitleService:
     def __init__(self):
@@ -19,7 +22,8 @@ class SubtitleService:
         import gc
         import torch
         if self._model:
-             # Explicitly delete all references to Whisper internals if possible
+             logger.info("Hard Unloading Whisper Model...")
+             # Explicitly delete all references to Whisper internals
              del self._model
              self._model = None
 
@@ -27,14 +31,17 @@ class SubtitleService:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Additional deep cleanup
+        # Aggressive deep cleanup
         try:
-            import torch
-            with torch.no_grad():
-                torch.cuda.empty_cache()
+            # Force cleanup of all generations multiple times
+            for _ in range(3):
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
         except:
             pass
-        gc.collect()
+
+        logger.info("Whisper model unloaded and memory reclaimed.")
 
     def transcribe(self, video_path: str) -> List[Dict]:
         """Transcribe video and return short word-level segments (viral style)."""

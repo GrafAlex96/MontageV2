@@ -66,6 +66,10 @@ class Renderer:
                 else:
                     current_preset = "slow"
 
+                # Use a truly unique temp audio file to prevent collisions/leaks
+                import uuid
+                temp_audio = os.path.join(settings.TEMP_STORAGE_PATH, f"temp-audio-{uuid.uuid4().hex}.m4a")
+
                 final_clip.write_videofile(
                     output_path,
                     fps=self.fps,
@@ -73,7 +77,7 @@ class Renderer:
                     audio_codec="aac",
                     bitrate="5000k",
                     preset=current_preset,
-                    temp_audiofile=f"temp-audio-{os.getpid()}.m4a",
+                    temp_audiofile=temp_audio,
                     remove_temp=True,
                     logger=None
                 )
