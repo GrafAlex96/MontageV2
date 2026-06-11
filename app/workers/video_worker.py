@@ -128,14 +128,9 @@ class VideoWorker:
                         frame_count = analyzer.get_frame_count()
                         scenes = analyzer.detect_scenes()
                         scenes = analyzer.analyze_movement(scenes, skip_movement=skip_movement)
+                        scenes = analyzer.analyze_audio_energy(scenes)
+                        scenes = analyzer.detect_hooks_and_peaks(scenes)
                         silences = analyzer.detect_silence()
-
-                        # --- CONSOLIDATED MASTER EDITOR PIPELINE ---
-                        # STEP 1: Story Intelligence
-                        story_data = self.story_intel.analyze_content(scenes)
-
-                        # STEP 2: Director Agent (Suggestions only)
-                        # director_suggestions = self.director.suggest_strategy(story_data)
 
                         # Integration note: Master Editor needs ALL clips for global hook
                         scored_scenes = analyzer.generate_quality_scores(scenes, silences)
@@ -446,12 +441,13 @@ class VideoWorker:
                     },
                     exc_info=True
                 )
-                session.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.FAILED, error_message=str(e)))
-                session.commit()
+                with get_db() as session_fail:
+                    session_fail.execute(update(Job).where(Job.id == job_id).values(status=JobStatus.FAILED, error_message=str(e)))
+                    session_fail.commit()
 
-                # Notify user
-                user = session.execute(select(User).where(User.id == job.user_id)).scalar_one()
-                await self.bot.send_message(user.telegram_id, f"Sorry, there was an error processing your video: {e}")
+                    # Notify user
+                    user = session_fail.execute(select(User).where(User.id == job.user_id)).scalar_one()
+                    await self.bot.send_message(user.telegram_id, f"🚨 Critical Error: {e}\nOur safety systems could not complete your video. Please try with shorter clips or different files.")
             finally:
                 # Forced cleanup at end of job
                 gc.collect()

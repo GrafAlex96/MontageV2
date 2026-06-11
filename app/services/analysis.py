@@ -5,6 +5,9 @@ from typing import List, Dict, Any
 from dataclasses import dataclass
 import subprocess
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Scene:
@@ -183,13 +186,19 @@ class VideoAnalyzer:
 
     def detect_silence(self) -> List[Dict[str, float]]:
         """Use FFmpeg to detect silent segments."""
+        from app.core.config import settings
         cmd = [
             'ffmpeg', '-i', self.video_path,
             '-af', 'silencedetect=noise=-30dB:d=0.5',
             '-f', 'null', '-'
         ]
         process = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-        _, stderr = process.communicate()
+        try:
+            _, stderr = process.communicate(timeout=settings.FFMPEG_KILL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            logger.warning("Silence detection timed out and was killed.")
+            return []
         stderr = stderr.decode()
 
         silences = []
@@ -206,12 +215,16 @@ class VideoAnalyzer:
         return silences
 
     def analyze_audio_energy(self, scenes: List[Scene]) -> List[Scene]:
-        """Analyze audio energy for each scene."""
+        """Analyze audio energy for each scene with reduced sampling for memory safety."""
+        if not self.policy.get("analyze_audio", True):
+            return scenes
+
         import librosa
         from dataclasses import replace
         updated_scenes = []
         try:
-            y, sr = librosa.load(self.video_path, sr=None)
+            # Use 22050Hz for 2x memory reduction compared to high-res audio
+            y, sr = librosa.load(self.video_path, sr=22050)
             for scene in scenes:
                 start_idx = int(scene.start_time * sr)
                 end_idx = int(scene.end_time * sr)
@@ -222,7 +235,7 @@ class VideoAnalyzer:
                         energy = float(np.mean(librosa.feature.rms(y=segment)))
                 updated_scenes.append(replace(scene, audio_energy=energy))
         except Exception as e:
-            print(f"Audio analysis failed: {e}")
+            logger.error(f"Audio energy analysis failed: {e}")
             return scenes
         return updated_scenes
 

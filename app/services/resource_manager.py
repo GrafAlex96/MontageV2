@@ -12,7 +12,11 @@ class ResourceManager:
 
     @staticmethod
     def get_memory_usage() -> float:
-        return psutil.virtual_memory().percent
+        """Process-scoped memory usage as percentage of available budget."""
+        from app.core.config import settings
+        used_mb = ResourceManager.get_memory_used_mb()
+        limit_mb = settings.MAX_RAM_MB
+        return (used_mb / limit_mb) * 100 if limit_mb > 0 else 0
 
     @staticmethod
     def get_memory_used_mb() -> float:
@@ -136,14 +140,21 @@ class ResourceManager:
 
     @staticmethod
     def limit_resources():
-        """Set global process limits for the current worker."""
+        """Set global process limits for the current worker based on budget and system load."""
         cpu = ResourceManager.get_cpu_usage()
-        mem = ResourceManager.get_system_memory_usage_pct()
+        # Use process-scoped budget percentage
+        mem_budget_pct = ResourceManager.get_memory_usage()
+        # Use system-wide pct for OS stability
+        mem_system_pct = ResourceManager.get_system_memory_usage_pct()
 
         if cpu > 95:
             logger.error(f"System CPU critical ({cpu}%). Stopping task.")
             raise RuntimeError("CPU limit exceeded")
 
-        if mem > 94: # Slightly higher threshold for hard stop
-            logger.error(f"System Memory critical ({mem}%). Stopping task.")
-            raise RuntimeError("Memory limit exceeded")
+        if mem_budget_pct > 95:
+            logger.error(f"Process memory budget exhausted ({mem_budget_pct:.1f}%). Stopping task.")
+            raise RuntimeError("Memory budget exceeded")
+
+        if mem_system_pct > 96:
+            logger.error(f"System Memory critical ({mem_system_pct:.1f}%). Stopping task.")
+            raise RuntimeError("System Memory critical")

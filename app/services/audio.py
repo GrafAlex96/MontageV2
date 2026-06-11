@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 class AudioService:
     def normalize_audio(self, input_path: str, output_path: str):
         """Normalize audio levels using ffmpeg-normalize or loudnorm filter."""
+        from app.core.config import settings
         # Using loudnorm filter for EBU R128 loudness normalization
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
@@ -15,7 +16,7 @@ class AudioService:
             '-c:v', 'copy', # keep video stream
             output_path
         ]
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=settings.FFMPEG_KILL_TIMEOUT)
 
     def detect_beats(self, input_path: str) -> Dict[str, Any]:
         """Detect beats and return with confidence score."""
@@ -68,20 +69,22 @@ class AudioService:
 
     def remove_noise(self, input_path: str, output_path: str):
         """Apply noise reduction using afftdn filter."""
+        from app.core.config import settings
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-af', 'afftdn=nf=-25',
             '-c:v', 'copy',
             output_path
         ]
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=settings.FFMPEG_KILL_TIMEOUT)
 
     def improve_clarity(self, input_path: str, output_path: str):
         """Combine normalization, noise reduction and equalization."""
+        from app.core.config import settings
         cmd = [
             'ffmpeg', '-y', '-i', input_path,
             '-af', 'afftdn=nf=-25,equalizer=f=3000:width_type=h:w=200:g=3,loudnorm=I=-16',
             '-c:v', 'copy',
             output_path
         ]
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=settings.FFMPEG_KILL_TIMEOUT)
